@@ -1,3 +1,3 @@
 # cs180
 
-Course project showcases for UC Berkeley CS180 (Computational Photography), fall 26. 
+Course project portfolio for UC Berkeley CS180 (Computational Photography), fall 26. 
