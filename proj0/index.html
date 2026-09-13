@@ -6,9 +6,9 @@
   <title>Project 0 — Camera Fundamentals | CS180</title>
   <link rel="stylesheet" href="../style.css">
 </head>
-<body>
+<body class="project-page">
 
-  <nav class="nav">
+  <nav class="nav" aria-label="Primary navigation">
     <div class="wrap">
       <a class="nav-brand" href="../index.html">CS180</a>
       <div class="nav-links">
@@ -19,93 +19,111 @@
 
   <header class="page-header">
     <div class="wrap">
-      <div class="eyebrow">Project 0</div>
-      <h1>Becoming Friends with Your Camera</h1>
-      <p>
-        How camera distance and focal length change perspective,
-        and why "zoom and step back" looks so different from "get close."  
-      </p>
+      <div class="page-header-grid">
+        <div class="eyebrow">Project 0</div>
+        <div class="page-title-block">
+          <h1>Becoming Friends with Your Camera</h1>
+          <p>
+            How camera distance and focal length change perspective,
+            and why "zoom and step back" looks so different from "get close."
+          </p>
+        </div>
+      </div>
     </div>
   </header>
 
   <main class="wrap">
 
     <section class="section" id="overview">
-      <h2>Overview</h2>
-      <p>
-        The three parts below show the effects of camera distance and focal
-        length on perspective. The camera on my smartphone was used to shoot
-        the photos.
-      </p>
-    </section>
-
-    <section class="section" id="part1">
-      <h2>Part 1: Selfie — The Wrong Way vs. The Right Way</h2>
-      <p>
-        One selfie taken up close, one taken from farther away and zoomed
-        in so the face is the same size.
-      </p>
-
-      <div class="compare-grid">
-        <figure>
-          <img src="media/part1_close.jpg" alt="Close-up selfie taken with no zoom, showing facial distortion">
-          <figcaption>Close, no zoom — the "wrong" way</figcaption>
-        </figure>
-        <figure>
-          <img src="media/part1_zoomed.jpg" alt="Selfie taken from farther away with zoom, matching face size">
-          <figcaption>Stepped back + zoomed — the "right" way</figcaption>
-        </figure>
+      <div class="section-heading">
+        <h2>Overview</h2>
       </div>
-
-      <div class="reflection">
-        <h3>Why do the two photos look so different?</h3>
-        <p>When the camera is close to the face, the near parts of the face (nose, chin)
-        appear larger than the far parts (ears, back of head), creating a distorted look.
-        When the camera is farther away and zoomed in, the face appears more natural and proportional.</p>
-      </div>
-    </section>
-
-    <section class="section" id="part2">
-      <h2>Part 2: Architectural Perspective Compression</h2>
-      <p>
-        One photo of Stiles Hall shot from far
-        away and zoomed in (compressed), one shot up close without zoom
-        (same building size in frame).
-      </p>
-
-      <div class="compare-grid">
-        <figure>
-          <img src="media/part2_compressed.jpg" alt="Building photographed from far away with zoom, showing perspective compression">
-          <figcaption>Far away + zoomed — compressed perspective</figcaption>
-        </figure>
-        <figure>
-          <img src="media/part2_normal.jpg" alt="Same building photographed up close without zoom">
-          <figcaption>Close, no zoom — normal perspective</figcaption>
-        </figure>
-      </div>
-
-      <div class="reflection">
-        <h3>Where does the "compression" effect come from?</h3>
-        <p>A longer focal length narrows the field of view, making distant objects appear
-          closer together and reducing the sense of depth in the image. In contrast, a
-          shorter focal length captures a wider field of view, exaggerating the distance
-          between objects and creating a more pronounced sense of depth.</p>
+      <div class="section-content">
+        <p>
+          The three parts below show the effects of camera distance and focal
+          length on perspective. The camera on my smartphone was used to shoot
+          the photos.
         </p>
       </div>
     </section>
 
+    <section class="section" id="part1">
+      <div class="section-heading">
+        <h2>Part 1: Selfie — The Wrong Way vs. The Right Way</h2>
+      </div>
+      <div class="section-content">
+        <p>
+          One selfie taken up close, one taken from farther away and zoomed
+          in so the face is the same size.
+        </p>
+
+        <div class="compare-grid">
+          <figure>
+            <img src="media/part1_close.jpg" alt="Close-up selfie taken with no zoom, showing facial distortion" loading="lazy" decoding="async">
+            <figcaption>Close, no zoom — the "wrong" way</figcaption>
+          </figure>
+          <figure>
+            <img src="media/part1_zoomed.jpg" alt="Selfie taken from farther away with zoom, matching face size" loading="lazy" decoding="async">
+            <figcaption>Stepped back + zoomed — the "right" way</figcaption>
+          </figure>
+        </div>
+
+        <div class="reflection">
+          <h3>Why do the two photos look so different?</h3>
+          <p>When the camera is close to the face, the near parts of the face (nose, chin)
+          appear larger than the far parts (ears, back of head), creating a distorted look.
+          When the camera is farther away and zoomed in, the face appears more natural and proportional.</p>
+        </div>
+      </div>
+    </section>
+
+    <section class="section" id="part2">
+      <div class="section-heading">
+        <h2>Part 2: Architectural Perspective Compression</h2>
+      </div>
+      <div class="section-content">
+        <p>
+          One photo of Stiles Hall shot from far
+          away and zoomed in (compressed), one shot up close without zoom
+          (same building size in frame).
+        </p>
+
+        <div class="compare-grid">
+          <figure>
+            <img src="media/part2_compressed.jpg" alt="Building photographed from far away with zoom, showing perspective compression" loading="lazy" decoding="async">
+            <figcaption>Far away + zoomed — compressed perspective</figcaption>
+          </figure>
+          <figure>
+            <img src="media/part2_normal.jpg" alt="Same building photographed up close without zoom" loading="lazy" decoding="async">
+            <figcaption>Close, no zoom — normal perspective</figcaption>
+          </figure>
+        </div>
+
+        <div class="reflection">
+          <h3>Where does the "compression" effect come from?</h3>
+          <p>A longer focal length narrows the field of view, making distant objects appear
+            closer together and reducing the sense of depth in the image. In contrast, a
+            shorter focal length captures a wider field of view, exaggerating the distance
+            between objects and creating a more pronounced sense of depth.</p>
+        </div>
+      </div>
+    </section>
+
     <section class="section" id="part3">
-      <h2>Part 3: The Dolly Zoom</h2>
-      <p>
-        Camera moving backward while zooming in, keeping the subject the same size
-        in every frame. The background appears to compress as the camera moves.
-      </p>
+      <div class="section-heading">
+        <h2>Part 3: The Dolly Zoom</h2>
+      </div>
+      <div class="section-content">
+        <p>
+          Camera moving backward while zooming in, keeping the subject the same size
+          in every frame. The background appears to compress as the camera moves.
+        </p>
 
-      <figure>
-        <img src="media/dolly_zoom.gif" alt="Animated GIF of a dolly zoom sequence, subject stays the same size while the background perspective shifts">
-        <figcaption>Dolly zoom / "Vertigo shot" sequence</figcaption>
-      </figure>
-
+        <figure class="feature-figure">
+          <img src="media/dolly_zoom.gif" alt="Animated GIF of a dolly zoom sequence, subject stays the same size while the background perspective shifts" loading="lazy" decoding="async">
+          <figcaption>Dolly zoom / "Vertigo shot" sequence</figcaption>
+        </figure>
+      </div>
     </section>
 
   </main>
