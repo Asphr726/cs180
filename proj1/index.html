@@ -1,0 +1,423 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="description" content="CS180 Project 1: reconstructing Prokudin-Gorskii color photographs with single-scale and pyramid image alignment.">
+  <title>Images of the Russian Empire — Project 1 | CS180</title>
+  <link rel="stylesheet" href="../style.css">
+  <script>
+    window.MathJax = {
+      tex: { inlineMath: [['\\(', '\\)']], displayMath: [['\\[', '\\]']] },
+      svg: { fontCache: 'global' }
+    };
+  </script>
+  <script defer src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-svg.js"></script>
+</head>
+<body class="project-page project1-page" id="top">
+  <nav class="nav" aria-label="Primary navigation">
+    <div class="wrap">
+      <a class="nav-brand" href="../index.html">CS180</a>
+      <div class="nav-links">
+        <a href="#method">Method</a>
+        <a href="#results">Results</a>
+        <a class="nav-back-top" href="#top" aria-label="Back to top"><span aria-hidden="true">↑</span> Top</a>
+      </div>
+    </div>
+  </nav>
+
+  <header class="page-header project1-header">
+    <div class="wrap">
+      <div class="page-header-grid">
+        <div class="eyebrow">Project 1</div>
+        <div class="page-title-block">
+          <h1>Images of the Russian Empire</h1>
+          <p>
+            Reconstructing a century-old world in color by aligning three
+            separately exposed glass-plate channels—first with exhaustive
+            search, then with a coarse-to-fine image pyramid.
+          </p>
+        </div>
+      </div>
+      <figure class="registration-hero">
+        <span class="channel-rail channel-rail-r" aria-hidden="true"></span>
+        <span class="channel-rail channel-rail-g" aria-hidden="true"></span>
+        <span class="channel-rail channel-rail-b" aria-hidden="true"></span>
+        <img src="media/emir_out.jpg" width="1800" height="1608" alt="Color reconstruction of the Emir of Bukhara seated in a richly patterned blue robe" fetchpriority="high" decoding="async">
+        <figcaption>
+          Emir of Bukhara, reconstructed from three monochrome exposures.
+          This image also exposes the limit of matching raw channel intensities.
+        </figcaption>
+      </figure>
+    </div>
+  </header>
+
+  <main class="wrap">
+    <section class="section" id="overview">
+      <div class="section-heading"><h2>Three exposures, one photograph</h2></div>
+      <div class="section-content">
+        <p class="lead-copy">
+          Sergei Prokudin-Gorskii photographed the Russian Empire through
+          blue, green, and red filters. The scans preserve those exposures as
+          three vertically stacked grayscale images. My task was to separate
+          the channels, estimate their translations, and recombine them into
+          a convincing RGB image with as few color fringes as possible.
+        </p>
+        <div class="plate-sequence" aria-label="Glass plate reconstruction sequence">
+          <figure class="sequence-stage plate-stage">
+            <div class="stage-number" aria-hidden="true">1</div>
+            <img src="media/cathedral_plate.jpg" width="390" height="1024" alt="Original Cathedral glass plate with the blue, green, and red grayscale exposures stacked vertically" loading="lazy" decoding="async">
+            <figcaption>The scanned glass plate: B, G, then R from top to bottom.</figcaption>
+          </figure>
+          <figure class="sequence-stage channels-stage">
+            <div class="stage-number" aria-hidden="true">2</div>
+            <div class="channel-strip">
+              <div><span class="channel-key key-blue">B</span><img src="media/cathedral_blue_channel.jpg" width="382" height="341" alt="Separated blue-filter exposure of Cathedral" loading="lazy" decoding="async"></div>
+              <div><span class="channel-key key-green">G</span><img src="media/cathedral_green_channel.jpg" width="382" height="341" alt="Separated green-filter exposure of Cathedral" loading="lazy" decoding="async"></div>
+              <div><span class="channel-key key-red">R</span><img src="media/cathedral_red_channel.jpg" width="382" height="341" alt="Separated red-filter exposure of Cathedral" loading="lazy" decoding="async"></div>
+            </div>
+            <figcaption>Equal thirds become independent grayscale channels.</figcaption>
+          </figure>
+          <figure class="sequence-stage result-stage">
+            <div class="stage-number" aria-hidden="true">3</div>
+            <img src="media/cathedral_aligned.jpg" width="382" height="341" alt="Cathedral color reconstruction after aligning the green and red channels to blue" loading="lazy" decoding="async">
+            <figcaption>Shift G and R toward B, then stack the channels as RGB.</figcaption>
+          </figure>
+        </div>
+        <p class="source-note">
+          Photographs originate from the
+          <a href="https://www.loc.gov/collections/prokudin-gorskii/" target="_blank" rel="noopener">Library of Congress Prokudin-Gorskii Collection</a>.
+          The alignment model is translation only: no rotation, scaling, or warping.
+        </p>
+      </div>
+    </section>
+
+    <section class="section" id="method">
+      <div class="section-heading"><h2>Core alignment pipeline</h2></div>
+      <div class="section-content">
+        <p>
+          Every image follows the same data path. The blue exposure is the
+          fixed reference; green and red are independently translated until
+          their similarity to blue is maximized. Keeping the reference fixed
+          also makes every reported displacement directly comparable.
+        </p>
+        <ol class="pipeline-list">
+          <li><span class="pipeline-title">Split and normalize</span><span>Divide the plate height into thirds and map pixel values to <code>[0, 1]</code>.</span></li>
+          <li><span class="pipeline-title">Suppress the frame</span><span>Detect near-black and near-white borders, then score only the central image region.</span></li>
+          <li><span class="pipeline-title">Search translations</span><span>Evaluate candidate <code>(x, y)</code> shifts for G→B and R→B with NCC.</span></li>
+          <li><span class="pipeline-title">Propagate across scales</span><span>For large scans, double the coarse estimate and refine it within a small local window.</span></li>
+          <li><span class="pipeline-title">Reconstruct color</span><span>Apply the winning shifts with <code>np.roll</code> and stack the result as <code>[R, G, B]</code>.</span></li>
+        </ol>
+        <div class="coordinate-note">
+          <strong>Offset convention.</strong>
+          All values below are <code>(x, y)</code>: positive x moves a channel
+          right, and positive y moves it down. Each shift aligns that channel
+          to the blue reference.
+        </div>
+      </div>
+    </section>
+
+    <section class="section" id="metrics">
+      <div class="section-heading"><h2>Choosing a similarity metric</h2></div>
+      <div class="section-content">
+        <p>
+          I implemented both Euclidean distance (L2) and mean-subtracted
+          normalized cross-correlation (NCC). On all three low-resolution
+          images they selected the same shifts. NCC was still the more
+          principled default because the filter exposures do not share a
+          common brightness scale.
+        </p>
+        <div class="metric-pair">
+          <article class="metric-definition metric-l2">
+            <h3>L2 distance</h3>
+            <div class="formula" aria-label="L2 equals the square root of the sum of squared pixel differences">
+              \[
+                d_{L_2}(I,J_\Delta)=
+                \sqrt{\sum_{x,y}\left(I(x,y)-J_\Delta(x,y)\right)^2}
+              \]
+            </div>
+            <p>
+              L2 compares absolute intensity values. My implementation takes
+              its reciprocal so that, like NCC, a larger score is better.
+              Exposure or contrast differences raise the distance even when
+              edges occur at exactly the same locations.
+            </p>
+          </article>
+          <article class="metric-definition metric-ncc">
+            <h3>Mean-subtracted NCC</h3>
+            <div class="formula" aria-label="Normalized cross correlation of mean-centered images">
+              \[
+                \operatorname{NCC}(I,J_\Delta)=
+                \frac{\sum_{x,y}\left(I-\mu_I\right)\left(J_\Delta-\mu_{J_\Delta}\right)}
+                {\sqrt{\sum_{x,y}\left(I-\mu_I\right)^2\sum_{x,y}\left(J_\Delta-\mu_{J_\Delta}\right)^2}}
+              \]
+            </div>
+            <p>
+              Subtracting the mean removes an additive brightness offset;
+              dividing by standard deviation removes positive contrast
+              scaling. NCC therefore measures whether spatial variations rise
+              and fall together, rather than whether their raw values match.
+            </p>
+          </article>
+        </div>
+        <figure class="metric-plot">
+          <img src="media/metric_response.svg" width="940" height="410" alt="Normalized NCC and inverse L2 curves over horizontal Cathedral shifts, both peaking at two pixels" loading="lazy" decoding="async">
+          <figcaption>
+            A real one-dimensional slice of the Cathedral search. With y fixed
+            at 5 px, both metrics peak at x = 2 px; the complete search still
+            evaluates every x–y pair.
+          </figcaption>
+        </figure>
+        <div class="theory-callout">
+          <h3>Why the normalization matters</h3>
+          <p>
+            Suppose one exposure is approximately <code>J = aI + b</code>,
+            where <code>a &gt; 0</code> represents contrast and <code>b</code>
+            represents brightness. After mean subtraction and standardization,
+            NCC is unchanged; L2 is not. This is a useful approximation for
+            three filtered photographs of the same geometry.
+          </p>
+          <p>
+            The invariance is not unlimited. Different materials may respond
+            very differently across wavelengths, highlights can saturate, and
+            local contrast can weaken or reverse. Those effects explain why
+            intensity NCC succeeds broadly but fails on Emir—and why structural
+            edge features help there.
+          </p>
+        </div>
+      </div>
+    </section>
+
+    <section class="section" id="single-scale">
+      <div class="section-heading"><h2>Single-scale search</h2></div>
+      <div class="section-content">
+        <p>
+          For the small JPEGs, exhaustive search is affordable. I test every
+          integer displacement in <code>[-15, 15] × [-15, 15]</code>, roll the
+          candidate channel, score its central half against blue, and retain
+          the largest NCC value. This is 961 candidates per channel.
+        </p>
+        <pre class="code-block" aria-label="Single-scale alignment pseudocode"><code>best_score = −∞
+for x in −15 … 15:
+    for y in −15 … 15:
+        candidate = roll(channel, x, y)
+        score = NCC(center(candidate), center(blue))
+        keep (x, y) if score is larger</code></pre>
+        <figure class="alignment-animation">
+          <picture>
+            <source media="(prefers-reduced-motion: reduce)" srcset="media/cathedral_aligned.jpg">
+            <img src="media/cathedral_alignment.gif" width="382" height="341" alt="Cathedral alternating between direct channel stacking with colored ghosting and the aligned reconstruction" loading="lazy" decoding="async">
+          </picture>
+          <figcaption>Direct stacking versus the winning alignment. Colored ghosting collapses as the channels register.</figcaption>
+        </figure>
+
+        <h3 class="content-heading">Borders are not scene content</h3>
+        <p>
+          My first full-frame search often rewarded agreement between the
+          glass-plate borders instead of agreement between buildings and
+          terrain. I mark a pixel as valid when it lies between 0.05 and 0.95,
+          take the union of the three channel masks, and apply its bounding box
+          to every channel. The union is conservative: content seen in any one
+          exposure is preserved.
+        </p>
+        <div class="mask-explainer">
+          <figure><img src="media/monastery_blue_channel.jpg" width="391" height="341" alt="Blue channel of Monastery showing the dark glass-plate frame" loading="lazy" decoding="async"><figcaption>One channel still contains a strong photographic frame.</figcaption></figure>
+          <figure><img src="media/monastery_border_mask.png" width="391" height="341" alt="Detected Monastery border mask with invalid pixels in red and the shared crop boundary in blue" loading="lazy" decoding="async"><figcaption>Red is rejected as near-black or near-white; blue marks the shared crop.</figcaption></figure>
+        </div>
+        <p>
+          Cropping substantially improved Monastery, but cropping alone made
+          Cathedral worse: remnants of its high-contrast frame still biased
+          the score. Restricting metric computation to the central half of each
+          dimension removed that remaining influence without tuning a special
+          crop for any individual photograph.
+        </p>
+        <div class="low-res-results">
+          <article class="comparison-set">
+            <div class="comparison-title"><h3>Cathedral</h3><span>G (2, 5) · R (3, 12)</span></div>
+            <div class="compare-grid compact-compare">
+              <figure><img src="media/cathedral.jpg" width="390" height="341" alt="Initial Cathedral alignment with noticeable colored ghosting" loading="lazy" decoding="async"><figcaption>Initial full-frame scoring</figcaption></figure>
+              <figure><img src="media/cathedral_cropped.jpg" width="382" height="341" alt="Final Cathedral alignment after border handling and center-region scoring" loading="lazy" decoding="async"><figcaption>Crop + center-region scoring</figcaption></figure>
+            </div>
+          </article>
+          <article class="comparison-set">
+            <div class="comparison-title"><h3>Monastery</h3><span>G (2, −3) · R (2, 3)</span></div>
+            <div class="compare-grid compact-compare">
+              <figure><img src="media/monastery.jpg" width="391" height="341" alt="Initial Monastery alignment with strong cyan and magenta channel separation" loading="lazy" decoding="async"><figcaption>Initial full-frame scoring</figcaption></figure>
+              <figure><img src="media/monastery_cropped.jpg" width="379" height="341" alt="Final well-aligned Monastery reconstruction after automatic cropping" loading="lazy" decoding="async"><figcaption>Crop + center-region scoring</figcaption></figure>
+            </div>
+          </article>
+          <article class="comparison-set">
+            <div class="comparison-title"><h3>Tobolsk</h3><span>G (3, 3) · R (3, 7)</span></div>
+            <div class="compare-grid compact-compare">
+              <figure><img src="media/tobolsk.jpg" width="396" height="341" alt="Initial Tobolsk color reconstruction" loading="lazy" decoding="async"><figcaption>Initial full-frame scoring</figcaption></figure>
+              <figure><img src="media/tobolsk_cropped.jpg" width="389" height="341" alt="Final Tobolsk reconstruction after automatic cropping and centered scoring" loading="lazy" decoding="async"><figcaption>Crop + center-region scoring</figcaption></figure>
+            </div>
+          </article>
+        </div>
+      </div>
+    </section>
+
+    <section class="section" id="pyramid">
+      <div class="section-heading"><h2>Coarse-to-fine alignment</h2></div>
+      <div class="section-content">
+        <p>
+          A displacement of one pixel at a tiny scale can represent tens or
+          hundreds of pixels in the original TIFF. I therefore build a
+          Gaussian pyramid recursively: blur before downsampling by two, solve
+          the smallest image, double that estimate at the next level, and
+          search only ±3 pixels around it. Recursion stops once either image
+          dimension is below 64 pixels.
+        </p>
+        <div class="pyramid-visual" aria-label="Four levels of the Harvesters Gaussian pyramid">
+          <figure class="pyramid-level level-zero"><img src="media/pyramid_level_0.jpg" width="760" height="680" alt="Finest displayed level of the Harvesters blue channel" loading="lazy" decoding="async"><figcaption>Fine</figcaption></figure>
+          <figure class="pyramid-level level-one"><img src="media/pyramid_level_1.jpg" width="480" height="430" alt="Second level of the Harvesters Gaussian pyramid" loading="lazy" decoding="async"><figcaption>½ scale</figcaption></figure>
+          <figure class="pyramid-level level-two"><img src="media/pyramid_level_2.jpg" width="300" height="269" alt="Third level of the Harvesters Gaussian pyramid" loading="lazy" decoding="async"><figcaption>¼ scale</figcaption></figure>
+          <figure class="pyramid-level level-three"><img src="media/pyramid_level_3.jpg" width="190" height="170" alt="Coarsest displayed level of the Harvesters Gaussian pyramid" loading="lazy" decoding="async"><figcaption>Coarse</figcaption></figure>
+        </div>
+        <div class="pyramid-logic">
+          <div><span class="logic-mark">Coarse</span><p>Search a small image where each pixel represents a large motion in the source.</p></div>
+          <div><span class="logic-mark">Propagate</span><p>Multiply the winning displacement by two when returning to the next finer level.</p></div>
+          <div><span class="logic-mark">Refine</span><p>Search a local ±3 px neighborhood and add the correction to the prediction.</p></div>
+        </div>
+        <pre class="code-block" aria-label="Pyramid alignment pseudocode"><code>align(level):
+    if level is coarsest: return search(±3)
+    coarse_shift = align(downsample(blur(level)))
+    prediction = 2 × coarse_shift
+    return prediction + search_around(prediction, ±3)</code></pre>
+        <p class="closing-copy">
+          The same local search code is reused at every level. The pyramid
+          changes the search strategy—not the similarity objective—and makes
+          large high-resolution displacements practical.
+        </p>
+      </div>
+    </section>
+
+    <section class="section" id="results">
+      <div class="section-heading"><h2>Complete displacement ledger</h2></div>
+      <div class="section-content">
+        <p>
+          The table records the intensity-NCC baseline requested by the
+          assignment. The three small JPEGs use direct exhaustive search; the
+          fourteen TIFFs use the pyramid. Sixteen of seventeen baseline results
+          align cleanly. Emir is the single failure and is corrected in the
+          extension immediately after the gallery.
+        </p>
+        <div class="table-scroll" tabindex="0" role="region" aria-label="Alignment offsets table">
+          <table class="offset-table">
+            <caption>Computed displacements relative to the blue channel</caption>
+            <thead><tr><th scope="col">Image</th><th scope="col">Set</th><th scope="col">Method</th><th scope="col">G → B</th><th scope="col">R → B</th><th scope="col">Baseline</th></tr></thead>
+            <tbody>
+              <tr><th scope="row">Cathedral</th><td>Provided</td><td>Single</td><td>(2, 5)</td><td>(3, 12)</td><td><span class="result-ok">Aligned</span></td></tr>
+              <tr><th scope="row">Monastery</th><td>Provided</td><td>Single</td><td>(2, −3)</td><td>(2, 3)</td><td><span class="result-ok">Aligned</span></td></tr>
+              <tr><th scope="row">Tobolsk</th><td>Provided</td><td>Single</td><td>(3, 3)</td><td>(3, 7)</td><td><span class="result-ok">Aligned</span></td></tr>
+              <tr><th scope="row">Church</th><td>Provided</td><td>Pyramid</td><td>(4, 25)</td><td>(−4, 58)</td><td><span class="result-ok">Aligned</span></td></tr>
+              <tr class="result-failure"><th scope="row">Emir</th><td>Provided</td><td>Pyramid</td><td>(24, 48)</td><td>(16, −38)</td><td><span>Misaligned</span></td></tr>
+              <tr><th scope="row">Harvesters</th><td>Provided</td><td>Pyramid</td><td>(17, 59)</td><td>(14, 123)</td><td><span class="result-ok">Aligned</span></td></tr>
+              <tr><th scope="row">Icon</th><td>Provided</td><td>Pyramid</td><td>(17, 41)</td><td>(23, 89)</td><td><span class="result-ok">Aligned</span></td></tr>
+              <tr><th scope="row">Ilemselga</th><td>Provided</td><td>Pyramid</td><td>(7, 40)</td><td>(11, 131)</td><td><span class="result-ok">Aligned</span></td></tr>
+              <tr><th scope="row">Melons</th><td>Provided</td><td>Pyramid</td><td>(10, 82)</td><td>(13, 178)</td><td><span class="result-ok">Aligned</span></td></tr>
+              <tr><th scope="row">Religious painting</th><td>Provided</td><td>Pyramid</td><td>(3, 29)</td><td>(7, 69)</td><td><span class="result-ok">Aligned</span></td></tr>
+              <tr><th scope="row">Self-portrait</th><td>Provided</td><td>Pyramid</td><td>(29, 78)</td><td>(37, 175)</td><td><span class="result-ok">Aligned</span></td></tr>
+              <tr><th scope="row">Siren</th><td>Provided</td><td>Pyramid</td><td>(−5, 49)</td><td>(−24, 97)</td><td><span class="result-ok">Aligned</span></td></tr>
+              <tr><th scope="row">Three generations</th><td>Provided</td><td>Pyramid</td><td>(14, 51)</td><td>(12, 110)</td><td><span class="result-ok">Aligned</span></td></tr>
+              <tr><th scope="row">Wharf</th><td>Provided</td><td>Pyramid</td><td>(−6, 15)</td><td>(−15, 82)</td><td><span class="result-ok">Aligned</span></td></tr>
+              <tr><th scope="row">Biological specimens</th><td>Selected</td><td>Pyramid</td><td>(−37, 40)</td><td>(−81, 108)</td><td><span class="result-ok">Aligned</span></td></tr>
+              <tr><th scope="row">Brick building</th><td>Selected</td><td>Pyramid</td><td>(−11, 42)</td><td>(−27, 98)</td><td><span class="result-ok">Aligned</span></td></tr>
+              <tr><th scope="row">V Italii</th><td>Selected</td><td>Pyramid</td><td>(21, 38)</td><td>(36, 77)</td><td><span class="result-ok">Aligned</span></td></tr>
+            </tbody>
+          </table>
+        </div>
+        <h3 class="gallery-heading">Provided high-resolution images</h3>
+        <div class="result-gallery">
+          <figure><a href="media/church_out.jpg" target="_blank"><img src="media/church_out.jpg" width="1800" height="1616" alt="Aligned color reconstruction of a church beside calm water" loading="lazy" decoding="async"></a><figcaption>Church · G (4, 25) · R (−4, 58)</figcaption></figure>
+          <figure><a href="media/harvesters_out.jpg" target="_blank"><img src="media/harvesters_out.jpg" width="1800" height="1612" alt="Aligned color reconstruction of harvesters standing in a field" loading="lazy" decoding="async"></a><figcaption>Harvesters · G (17, 59) · R (14, 123)</figcaption></figure>
+          <figure><a href="media/icon_out.jpg" target="_blank"><img src="media/icon_out.jpg" width="1800" height="1561" alt="Aligned color reconstruction of an ornate religious interior" loading="lazy" decoding="async"></a><figcaption>Icon · G (17, 41) · R (23, 89)</figcaption></figure>
+          <figure><a href="media/ilemselga_out.jpg" target="_blank"><img src="media/ilemselga_out.jpg" width="1800" height="1608" alt="Aligned color reconstruction of a small wooden church at Ilemselga" loading="lazy" decoding="async"></a><figcaption>Ilemselga · G (7, 40) · R (11, 131)</figcaption></figure>
+          <figure><a href="media/melons_out.jpg" target="_blank"><img src="media/melons_out.jpg" width="1800" height="1614" alt="Aligned color reconstruction of a melon seller surrounded by fruit" loading="lazy" decoding="async"></a><figcaption>Melons · G (10, 82) · R (13, 178)</figcaption></figure>
+          <figure><a href="media/religous_painting_out.jpg" target="_blank"><img src="media/religous_painting_out.jpg" width="1800" height="1595" alt="Aligned color reconstruction of a framed religious painting" loading="lazy" decoding="async"></a><figcaption>Religious painting · G (3, 29) · R (7, 69)</figcaption></figure>
+          <figure><a href="media/self_portrait_out.jpg" target="_blank"><img src="media/self_portrait_out.jpg" width="1800" height="1629" alt="Aligned color reconstruction of Prokudin-Gorskii seated beside a mountain stream" loading="lazy" decoding="async"></a><figcaption>Self-portrait · G (29, 78) · R (37, 175)</figcaption></figure>
+          <figure><a href="media/siren_out.jpg" target="_blank"><img src="media/siren_out.jpg" width="1800" height="1588" alt="Aligned color reconstruction of a flowering lilac bush" loading="lazy" decoding="async"></a><figcaption>Siren · G (−5, 49) · R (−24, 97)</figcaption></figure>
+          <figure><a href="media/three_generations_out.jpg" target="_blank"><img src="media/three_generations_out.jpg" width="1800" height="1593" alt="Aligned color reconstruction of three people from successive generations" loading="lazy" decoding="async"></a><figcaption>Three generations · G (14, 51) · R (12, 110)</figcaption></figure>
+          <figure><a href="media/wharf_out.jpg" target="_blank"><img src="media/wharf_out.jpg" width="1800" height="1606" alt="Aligned color reconstruction of a wooden wharf with a moored boat" loading="lazy" decoding="async"></a><figcaption>Wharf · G (−6, 15) · R (−15, 82)</figcaption></figure>
+        </div>
+      </div>
+    </section>
+
+    <section class="section" id="extensions">
+      <div class="section-heading"><h2>Better features for Emir</h2></div>
+      <div class="section-content">
+        <p>
+          Emir is the one baseline failure. His blue robe is bright in the
+          blue-filter exposure but much darker in the red-filter exposure, so
+          corresponding pixels violate NCC's approximate affine-brightness
+          assumption. Raw-intensity NCC sends the red channel upward instead
+          of matching the face, garment seams, and architecture.
+        </p>
+        <div class="emir-comparison">
+          <figure><img src="media/emir_intensity_baseline.jpg" width="1800" height="1608" alt="Misaligned Emir reconstruction produced by raw-intensity pyramid NCC" loading="lazy" decoding="async"><figcaption>Intensity NCC · G (24, 48) · R (16, −38)</figcaption></figure>
+          <figure><img src="media/emir_out.jpg" width="1800" height="1608" alt="Correctly aligned Emir reconstruction produced with Laplacian edge features" loading="lazy" decoding="async"><figcaption>Laplacian NCC · G (24, 49) · R (41, 106)</figcaption></figure>
+        </div>
+        <figure class="laplacian-figure">
+          <img src="media/emir_laplacian_channels.jpg" width="1696" height="500" alt="Laplacian magnitude maps for Emir's blue, green, and red channels shown from left to right" loading="lazy" decoding="async">
+          <figcaption>Laplacian magnitudes for B, G, and R, left to right. Color and brightness largely disappear, while the turban, silhouette, garment seams, and door frames remain comparable.</figcaption>
+        </figure>
+        <div class="theory-callout extension-callout">
+          <h3>What changed—and what did not</h3>
+          <p>
+            I changed only the representation passed to the same NCC search.
+            A discrete Laplacian emphasizes rapid spatial variation, so the
+            score follows shared contours rather than raw color response. The
+            pyramid, translation model, blue reference, and local search
+            window remain unchanged.
+          </p>
+        </div>
+      </div>
+    </section>
+
+    <section class="section" id="selected-images">
+      <div class="section-heading"><h2>Beyond the provided set</h2></div>
+      <div class="section-content">
+        <p>
+          I downloaded three additional glass plates from the collection to
+          test whether the same fixed pipeline generalized to different
+          subjects: a specimen chart with dense repetitive detail, a brick
+          building with strong edges, and a high-key portrait on a veranda.
+          All three aligned without image-specific parameter tuning.
+        </p>
+        <div class="selected-gallery">
+          <figure><a href="media/biological_specimens_out.jpg" target="_blank"><img src="media/biological_specimens_out.jpg" width="1800" height="1599" alt="Aligned color reconstruction of a framed biological specimen chart" loading="lazy" decoding="async"></a><figcaption>Biological specimens · G (−37, 40) · R (−81, 108)</figcaption></figure>
+          <figure><a href="media/brick_building_out.jpg" target="_blank"><img src="media/brick_building_out.jpg" width="1800" height="1611" alt="Aligned color reconstruction of a brick building framed by trees" loading="lazy" decoding="async"></a><figcaption>Brick building · G (−11, 42) · R (−27, 98)</figcaption></figure>
+          <figure><a href="media/v_italii_out.jpg" target="_blank"><img src="media/v_italii_out.jpg" width="1800" height="1611" alt="Aligned color reconstruction of a woman seated at a veranda table in Italy" loading="lazy" decoding="async"></a><figcaption>V Italii · G (21, 38) · R (36, 77)</figcaption></figure>
+        </div>
+      </div>
+    </section>
+
+    <section class="section conclusion-section" id="conclusion">
+      <div class="section-heading"><h2>What I learned</h2></div>
+      <div class="section-content">
+        <p class="conclusion-copy">
+          Reliable alignment begins with comparing the right evidence.
+        </p>
+        <p>
+          A small exhaustive search establishes a trustworthy baseline; border
+          suppression keeps the objective focused on the scene; a Gaussian
+          pyramid makes large translations efficient; and structural features
+          rescue the case where channel intensities cease to be comparable.
+        </p>
+        <p>
+          The remaining colored rims come from the physical plate boundaries
+          and circular array shifts. A more complete restoration pipeline
+          could detect a final overlap region after alignment, estimate
+          channel-specific valid support, and add automatic contrast or white
+          balance. Those are presentation improvements rather than corrections
+          to the recovered geometry.
+        </p>
+      </div>
+    </section>
+  </main>
+
+  <footer class="footer">
+    <div class="wrap"><p><a href="mailto:zyzhu@berkeley.edu">Zhenyan Zhu</a> · CS180, Fall 2026</p></div>
+  </footer>
+</body>
+</html>
