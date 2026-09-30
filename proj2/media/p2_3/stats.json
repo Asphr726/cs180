@@ -1,0 +1,21 @@
+{
+  "levels": 5,
+  "image_sigmas": [
+    0,
+    1,
+    2,
+    4,
+    8,
+    16
+  ],
+  "mask_sigmas": [
+    1,
+    2,
+    4,
+    8,
+    16,
+    32
+  ],
+  "apple_reconstruction_error": 1.1102230246251565e-16,
+  "orange_reconstruction_error": 2.7755575615628914e-17
+}

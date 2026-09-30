@@ -1,0 +1,19 @@
+{
+  "sigma": 2.0,
+  "kernel_size": 13,
+  "alphas": [
+    0.5,
+    1.0,
+    2.0,
+    4.0
+  ],
+  "taj_single_kernel_vs_blur_subtract_add": 4.3298697960381105e-15,
+  "me_single_kernel_vs_blur_subtract_add": 3.885780586188048e-15,
+  "view_psnr": {
+    "blurred": 24.189861710404337,
+    "alpha_0.5": 24.696141637798526,
+    "alpha_1": 25.123611245094594,
+    "alpha_2": 25.622460617859716,
+    "alpha_4": 24.92152640357435
+  }
+}

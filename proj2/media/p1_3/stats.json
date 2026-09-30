@@ -1,0 +1,22 @@
+{
+  "orientation_max_error_vs_np_arctan2_rad": 3.431355337535358e-06,
+  "sigma": 2.0,
+  "kernel_size": 13,
+  "dog_kernel_shape": [
+    13,
+    15
+  ],
+  "threshold": 0.1,
+  "max_abs_diff_dx": 1.033895191682177e-15,
+  "max_abs_diff_dy": 9.684093804640526e-16,
+  "max_abs_diff_magnitude": 1.0200174038743626e-15,
+  "edges_identical": true,
+  "magnitude_max": 0.30184463922256954,
+  "magnitude_percentiles": {
+    "50": 0.004944602136596246,
+    "90": 0.07121075483530465,
+    "95": 0.12580875804074695,
+    "99": 0.20110885352012406
+  },
+  "edge_fraction": 0.0706911304689363
+}

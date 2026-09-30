@@ -1,7 +1,9 @@
 .DS_Store
 .vscode/
+__pycache__/
 docs/
 code/
 data/
+web/
 *.tif
 note.*
