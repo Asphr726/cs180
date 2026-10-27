@@ -1,0 +1,637 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="description" content="CS180 Project 4A: homographies from hand-picked correspondences, inverse warping with nearest-neighbor and bilinear sampling, rectification, feathered planar mosaics, and a cylindrical panorama.">
+  <title>Stitching Photo Mosaics — Project 4 | CS180</title>
+  <link rel="stylesheet" href="../style.css">
+  <script>
+    window.MathJax = {
+      tex: { inlineMath: [['\\(', '\\)']], displayMath: [['\\[', '\\]']] },
+      svg: { fontCache: 'global' }
+    };
+  </script>
+  <script defer src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-svg.js"></script>
+</head>
+<body class="project-page project4-page" id="top">
+  <nav class="nav" aria-label="Primary navigation">
+    <div class="wrap">
+      <a class="nav-brand" href="../index.html">CS180</a>
+      <div class="nav-links">
+        <a href="#part-a">Part A</a>
+        <a href="#part-b">Part B</a>
+        <a class="nav-back-top" href="#top" aria-label="Back to top"><span aria-hidden="true">↑</span> Top</a>
+      </div>
+    </div>
+  </nav>
+
+  <header class="page-header project4-header">
+    <div class="wrap">
+      <div class="page-header-grid">
+        <div class="eyebrow">Project 4</div>
+        <div class="page-title-block">
+          <h1>Stitching Photo Mosaics</h1>
+          <p>
+            Photos taken from one spot while the camera turns are related by
+            a homography, a 3 × 3 matrix. Part A recovers it from
+            hand-picked correspondences, then uses it to rectify planes, warp
+            images into a shared frame, feather them into mosaics, and finally
+            wrap a 117° view onto a cylinder.
+          </p>
+        </div>
+      </div>
+      <figure class="pano-hero" data-pano>
+        <div class="pano-scroll" tabindex="0" role="region" aria-label="Cylindrical panorama of the ridge. Scroll or drag sideways.">
+          <div class="pano-track">
+            <img width="2062" height="755" src="media/a5/cyl_set1.webp" alt="Cylindrical panorama of nine photos of a forested ridge under a blue sky, snowy peaks on the horizon and an interpretive sign at the lower right" fetchpriority="high" decoding="async">
+            <div class="pano-ruler" aria-hidden="true"><span class="pano-tick" style="left:0.00%"><span>0°</span></span><span class="pano-tick" style="left:12.82%"><span>15°</span></span><span class="pano-tick" style="left:25.65%"><span>30°</span></span><span class="pano-tick" style="left:38.47%"><span>45°</span></span><span class="pano-tick" style="left:51.29%"><span>60°</span></span><span class="pano-tick" style="left:64.12%"><span>75°</span></span><span class="pano-tick" style="left:76.94%"><span>90°</span></span><span class="pano-tick" style="left:89.76%"><span>105°</span></span></div>
+          </div>
+        </div>
+        <figcaption><span class="cap-text">Nine handheld photos, 117° of horizon, projected onto a cylinder of radius 1010 px (A.5). The ruler is exact, since position on the cylinder is proportional to angle, measured from the left edge. Drag or scroll sideways.</span></figcaption>
+      </figure>
+    </div>
+  </header>
+
+<div class="wrap p4-layout">
+    <nav class="toc" aria-label="On this page" data-toc>
+      <p class="toc-title">Contents</p>
+      <ol class="toc-list">
+        <li><a href="#overview"><span class="toc-text">Overview</span></a></li>
+        <li class="toc-group">
+          <a href="#part-a"><span class="toc-no">A</span><span class="toc-text">Warping and mosaicing</span></a>
+          <ol>
+            <li><a href="#shoot"><span class="toc-no">A.1</span><span class="toc-text">Shooting the pictures</span></a></li>
+            <li>
+              <a href="#homography"><span class="toc-no">A.2</span><span class="toc-text">Recovering homographies</span></a>
+              <ol class="toc-sub">
+                <li><a href="#correspondences">Correspondences and \(H\)</a></li>
+              </ol>
+            </li>
+            <li>
+              <a href="#warp"><span class="toc-no">A.3</span><span class="toc-text">Warping and rectification</span></a>
+              <ol class="toc-sub">
+                <li><a href="#rectify-demo">Drag-to-rectify demo</a></li>
+                <li><a href="#samplers">Nearest vs bilinear</a></li>
+              </ol>
+            </li>
+            <li>
+              <a href="#mosaic"><span class="toc-no">A.4</span><span class="toc-text">Blending into a mosaic</span></a>
+              <ol class="toc-sub">
+                <li><a href="#feathering">Equal weights vs feathering</a></li>
+                <li><a href="#canvas-growth">How the canvas grows</a></li>
+                <li><a href="#three-mosaics">Three mosaics</a></li>
+                <li><a href="#photo-count">How many photos fit</a></li>
+              </ol>
+            </li>
+            <li><a href="#cylinder"><span class="toc-no">A.5</span><span class="toc-text">Cylindrical panorama</span></a></li>
+          </ol>
+        </li>
+        <li class="toc-group toc-pending">
+          <a href="#part-b"><span class="toc-no">B</span><span class="toc-text">Autostitching</span><span class="toc-note">Nov 10</span></a>
+        </li>
+        <li><a href="#learned"><span class="toc-text">What I learned</span></a></li>
+      </ol>
+    </nav>
+
+  <main class="p4-main">
+    <section class="section" id="overview">
+      <div class="section-heading"><h2>One center of projection, many pictures</h2></div>
+      <div class="section-content">
+        <p class="lead-copy">
+          If the camera only rotates about its optical center, every ray it
+          records is still the same ray in the next photo. Only the image plane
+          has turned. Two pinhole images of the same rays differ by a projective
+          map of the plane, \(p' \sim Hp\), and depth stops mattering.
+        </p>
+        <div class="formula">
+          \[
+            \begin{bmatrix} wx' \\ wy' \\ w \end{bmatrix}
+            =
+            \underbrace{\begin{bmatrix} a & b & c \\ d & e & f \\ g & h & 1 \end{bmatrix}}_{H\;=\;K R K^{-1}}
+            \begin{bmatrix} x \\ y \\ 1 \end{bmatrix},
+            \qquad
+            x' = \frac{ax+by+c}{gx+hy+1},\quad
+            y' = \frac{dx+ey+f}{gx+hy+1}
+          \]
+        </div>
+        <p class="overview-body">
+          The same equation covers a second case: any photo of a flat surface.
+          That is what rectification uses. The page follows the pipeline in
+          order: shoot (A.1), estimate \(H\) (A.2), warp with two samplers
+          (A.3), blend (A.4), and go past what a plane can hold with a
+          cylinder (A.5). Interactive figures are marked in their captions.
+        </p>
+      </div>
+    </section>
+
+    <!-- ============================================================ PART A -->
+
+    <section class="section part-intro" id="part-a">
+      <div class="section-heading"><p class="part-no">Part A</p><h2>Image warping and mosaicing</h2></div>
+      <div class="section-content">
+        <p>
+          Every result comes from <code>code/main.py</code> with NumPy, and
+          OpenCV is used only for file I/O, color conversion, and a distance
+          transform. The extra figures (the equal-weight comparison,
+          intermediate canvases, timings) come from a separate script that
+          calls the same functions. The homography solver, both samplers, the blender, and the
+          cylindrical projection are written by hand; no
+          <code>findHomography</code>, <code>warpPerspective</code> or
+          <code>remap</code>. Correspondences were clicked with the course
+          correspondence tool, 6 to 11 per pair, and saved as JSON.
+        </p>
+      </div>
+    </section>
+
+    <section class="section" id="shoot">
+      <div class="section-heading"><p class="part-no">Part A 1</p><h2>Shooting the pictures</h2></div>
+      <div class="section-content">
+        <p>
+          Three sequences, each shot by turning a handheld camera about its
+          lens: a forested ridge in the Sierra Nevada panned left to right, a
+          giant sequoia tilted from its base to its crown, and a room panned
+          across a corner, from the side wall to the back wall. Neighbors
+          overlap by about 50–65% in the ridge set and 65–72% in the sequoia
+          set. The room was shot with smaller turns, 67–82%, so two of its
+          pairs go past the recommended 40–70%. All images were resized to 512 px wide
+          before clicking correspondences.
+        </p>
+        <p class="strip-label">Ridge, panned left to right. Photos 1–5 make the planar mosaic; all nine make the cylindrical panorama.</p><div class="t-strip a1-strip" style="--n: 9"><figure><img width="512" height="683" src="media/a1/set1_1.jpg" alt="Ridge photo 1 of 9" loading="lazy" decoding="async"><figcaption>1</figcaption></figure><figure><img width="512" height="683" src="media/a1/set1_2.jpg" alt="Ridge photo 2 of 9" loading="lazy" decoding="async"><figcaption>2</figcaption></figure><figure><img width="512" height="683" src="media/a1/set1_3.jpg" alt="Ridge photo 3 of 9" loading="lazy" decoding="async"><figcaption>3</figcaption></figure><figure><img width="512" height="683" src="media/a1/set1_4.jpg" alt="Ridge photo 4 of 9" loading="lazy" decoding="async"><figcaption>4</figcaption></figure><figure><img width="512" height="683" src="media/a1/set1_5.jpg" alt="Ridge photo 5 of 9" loading="lazy" decoding="async"><figcaption>5</figcaption></figure><figure><img width="512" height="683" src="media/a1/set1_6.jpg" alt="Ridge photo 6 of 9" loading="lazy" decoding="async"><figcaption>6</figcaption></figure><figure><img width="512" height="683" src="media/a1/set1_7.jpg" alt="Ridge photo 7 of 9" loading="lazy" decoding="async"><figcaption>7</figcaption></figure><figure><img width="512" height="683" src="media/a1/set1_8.jpg" alt="Ridge photo 8 of 9" loading="lazy" decoding="async"><figcaption>8</figcaption></figure><figure><img width="512" height="683" src="media/a1/set1_9.jpg" alt="Ridge photo 9 of 9" loading="lazy" decoding="async"><figcaption>9</figcaption></figure></div>
+        <p class="strip-label">Sequoia, tilted bottom to top. Three photos, image 2 is the reference.</p><div class="t-strip a1-strip a1-strip-tall" style="--n: 3"><figure><img width="512" height="768" src="media/a1/set2_1.jpg" alt="Sequoia photo 1 of 3" loading="lazy" decoding="async"><figcaption>1</figcaption></figure><figure><img width="512" height="768" src="media/a1/set2_2.jpg" alt="Sequoia photo 2 of 3" loading="lazy" decoding="async"><figcaption>2</figcaption></figure><figure><img width="512" height="768" src="media/a1/set2_3.jpg" alt="Sequoia photo 3 of 3" loading="lazy" decoding="async"><figcaption>3</figcaption></figure></div>
+        <p class="strip-label">Room, panned left to right with a wide lens. Five photos, image 3 is the reference.</p><div class="t-strip a1-strip a1-strip-tall" style="--n: 5"><figure><img width="512" height="768" src="media/a1/set3_1.jpg" alt="Room photo 1 of 5" loading="lazy" decoding="async"><figcaption>1</figcaption></figure><figure><img width="512" height="768" src="media/a1/set3_2.jpg" alt="Room photo 2 of 5" loading="lazy" decoding="async"><figcaption>2</figcaption></figure><figure><img width="512" height="768" src="media/a1/set3_3.jpg" alt="Room photo 3 of 5" loading="lazy" decoding="async"><figcaption>3</figcaption></figure><figure><img width="512" height="768" src="media/a1/set3_4.jpg" alt="Room photo 4 of 5" loading="lazy" decoding="async"><figcaption>4</figcaption></figure><figure><img width="512" height="768" src="media/a1/set3_5.jpg" alt="Room photo 5 of 5" loading="lazy" decoding="async"><figcaption>5</figcaption></figure></div>
+        <p class="source-note">
+          A handheld camera does not rotate exactly about its optical center.
+          Distant scenery tolerates that: a few centimeters of drift is tiny
+          next to a mountain kilometers away. Nearby objects do not. They are
+          the main place the mosaics below fail: the lower branches of the near
+          pine in the middle of the ridge mosaics, and the chairs in the
+          room. The other risk is correspondences that do not cover the
+          overlap, covered in A.4.
+        </p>
+      </div>
+    </section>
+
+    <section class="section" id="homography">
+      <div class="section-heading"><p class="part-no">Part A 2</p><h2>Recovering homographies</h2></div>
+      <div class="section-content">
+        <p>
+          Each correspondence \((x,y)\mapsto(u,v)\) gives two equations that
+          are linear in the nine entries of \(H\) once the denominator is
+          multiplied out. Stacking \(n\) pairs gives a \(2n\times 9\) system.
+        </p>
+        <div class="formula">
+          \[
+            \underbrace{\begin{bmatrix}
+              x_1 & y_1 & 1 & 0 & 0 & 0 & -u_1x_1 & -u_1y_1 & -u_1 \\
+              0 & 0 & 0 & x_1 & y_1 & 1 & -v_1x_1 & -v_1y_1 & -v_1 \\
+              \vdots & & & & & & & & \vdots \\
+              x_n & y_n & 1 & 0 & 0 & 0 & -u_nx_n & -u_ny_n & -u_n \\
+              0 & 0 & 0 & x_n & y_n & 1 & -v_nx_n & -v_ny_n & -v_n
+            \end{bmatrix}}_{A\;(2n\times 9)}
+            \begin{bmatrix} h_{11} \\ h_{12} \\ \vdots \\ h_{33} \end{bmatrix}
+            = \mathbf 0
+          \]
+        </div>
+        <p>
+          With four points the system has an exact one-dimensional null space.
+          With more, noise makes it full rank, so <code>computeH</code> solves
+          the least-squares problem \(\min\lVert Ah\rVert\) subject to
+          \(\lVert h\rVert=1\). The answer is the right singular vector of
+          \(A\) with the smallest singular value. It is then rescaled so
+          \(h_{33}=1\), the same eight-parameter form as the spec's
+          \(Ah=b\). The fit itself differs slightly, because no entry is
+          fixed while solving. On these pairs the two agree to within
+          0.001 px.
+        </p>
+        <pre class="code-block" tabindex="0" role="region" aria-label="computeH"><code>def computeH(img1_pts, img2_pts):
+    img1_pts_norm, T1 = normalizePoints(img1_pts)   # centroid at 0, mean distance √2
+    img2_pts_norm, T2 = normalizePoints(img2_pts)
+    A = []                                          # two rows per correspondence
+    for (x, y), (u, v) in zip(img1_pts_norm, img2_pts_norm):
+        A.append([x, y, 1, 0, 0, 0, -u*x, -u*y, -u])
+        A.append([0, 0, 0, x, y, 1, -v*x, -v*y, -v])
+    _, _, Vt = np.linalg.svd(np.asarray(A))
+    H = np.linalg.inv(T2) @ Vt[-1].reshape(3, 3) @ T1   # undo the normalization
+    return H / H[2, 2]</code></pre>
+        <div class="reflection">
+          <h3>Why normalize first</h3>
+          <p>
+            In raw pixels the columns of \(A\) mix 1, coordinates near 500,
+            and products near 250,000. The ratio between the largest and the
+            eighth singular value, which sets how much click noise is amplified
+            into \(h\), has a median of \(4.0\times10^{6}\) over the 14 pairs. After moving
+            each point set's centroid to the origin and scaling its mean
+            distance to \(\sqrt2\) (Hartley normalization), the median is
+            6.6. The fit is done there and mapped back with
+            \(H=T_2^{-1}\hat H\,T_1\).
+          </p>
+        </div>
+
+        <h3 class="content-heading" id="correspondences">Correspondences and the recovered matrices</h3>
+        <p>
+          Pick a pair below. Numbered dots are the clicked points. On the right,
+          a hollow ring marks where \(H\) sends each left point, and the red
+          tick from the click to the ring is the residual, drawn 5× longer.
+          Hover or focus a point to find its partner.
+        </p>
+        <figure class="corr-viewer" data-corr>
+          <div class="explorer-controls" role="radiogroup" aria-label="Image pair">
+            <span class="explorer-label">Pair</span>
+            <button type="button" role="radio" aria-checked="false" data-pair="0">Ridge 1→2</button><button type="button" role="radio" aria-checked="false" data-pair="1">Ridge 2→3</button><button type="button" role="radio" aria-checked="false" data-pair="2">Ridge 3→4</button><button type="button" role="radio" aria-checked="false" data-pair="3">Ridge 4→5</button><button type="button" role="radio" aria-checked="false" data-pair="4">Ridge 5→6</button><button type="button" role="radio" aria-checked="false" data-pair="5">Ridge 6→7</button><button type="button" role="radio" aria-checked="false" data-pair="6">Ridge 7→8</button><button type="button" role="radio" aria-checked="false" data-pair="7">Ridge 8→9</button><button type="button" role="radio" aria-checked="false" data-pair="8">Sequoia 1→2</button><button type="button" role="radio" aria-checked="true" data-pair="9">Sequoia 2→3</button><button type="button" role="radio" aria-checked="false" data-pair="10">Room 1→2</button><button type="button" role="radio" aria-checked="false" data-pair="11">Room 2→3</button><button type="button" role="radio" aria-checked="false" data-pair="12">Room 3→4</button><button type="button" role="radio" aria-checked="false" data-pair="13">Room 4→5</button>
+          </div>
+          <div class="corr-stage">
+            <div class="corr-panel"><img class="corr-left" alt="" decoding="async"><svg class="corr-svg" aria-hidden="true"></svg><span class="corr-tag"></span></div>
+            <div class="corr-panel"><img class="corr-right" alt="" decoding="async"><svg class="corr-svg" aria-hidden="true"></svg><span class="corr-tag"></span></div>
+          </div>
+          <div class="corr-readout">
+            <div class="matrix-readout" aria-live="polite"></div>
+            <p class="corr-stats" aria-live="polite"></p>
+          </div>
+          <figcaption><span class="cap-text">Interactive. The homography maps the left image into the right one. Its last row carries the perspective terms \(g, h\), small numbers in pixel units that still bend the frame visibly at 500 px.</span></figcaption>
+        </figure>
+
+        <p class="table-title" id="pairs-title">Reprojection error of every clicked pair (pixels, after the least-squares fit)</p>
+        <div class="table-scroll p2-table-wrap" tabindex="0" role="region" aria-labelledby="pairs-title">
+          <table class="p2-table" aria-labelledby="pairs-title">
+            <thead><tr><th scope="col">Set</th><th scope="col">Pair</th><th scope="col">Points</th><th scope="col">RMSE</th><th scope="col">Max</th><th scope="col">Used in</th></tr></thead>
+            <tbody><tr><th scope="row">Ridge</th><td>1 → 2</td><td>11</td><td>2.01</td><td>3.22</td><td>planar + cylinder</td></tr><tr><th scope="row">Ridge</th><td>2 → 3</td><td>11</td><td>1.40</td><td>2.60</td><td>planar + cylinder</td></tr><tr><th scope="row">Ridge</th><td>3 → 4</td><td>11</td><td>1.35</td><td>2.12</td><td>planar + cylinder</td></tr><tr><th scope="row">Ridge</th><td>4 → 5</td><td>11</td><td>1.89</td><td>5.01</td><td>planar + cylinder</td></tr><tr><th scope="row">Ridge</th><td>5 → 6</td><td>11</td><td>1.40</td><td>2.26</td><td>cylinder only</td></tr><tr><th scope="row">Ridge</th><td>6 → 7</td><td>11</td><td>1.57</td><td>2.72</td><td>cylinder only</td></tr><tr><th scope="row">Ridge</th><td>7 → 8</td><td>11</td><td>1.11</td><td>1.84</td><td>cylinder only</td></tr><tr class="row-flag"><th scope="row">Ridge</th><td>8 → 9</td><td>11</td><td>7.28</td><td>16.64</td><td>cylinder only</td></tr><tr><th scope="row">Sequoia</th><td>1 → 2</td><td>6</td><td>1.23</td><td>2.13</td><td>planar</td></tr><tr><th scope="row">Sequoia</th><td>2 → 3</td><td>13</td><td>0.96</td><td>1.99</td><td>planar</td></tr><tr><th scope="row">Room</th><td>1 → 2</td><td>8</td><td>1.33</td><td>2.30</td><td>planar</td></tr><tr><th scope="row">Room</th><td>2 → 3</td><td>8</td><td>0.92</td><td>1.36</td><td>planar</td></tr><tr><th scope="row">Room</th><td>3 → 4</td><td>8</td><td>0.59</td><td>0.89</td><td>planar</td></tr><tr><th scope="row">Room</th><td>4 → 5</td><td>8</td><td>1.14</td><td>1.77</td><td>planar</td></tr></tbody>
+          </table>
+        </div>
+        <p>
+          Every pair used in a planar mosaic fits to about 2 px RMS or better, about
+          the precision of a click on a 512 px image. The outlier is the last
+          ridge pair, 8 → 9, at 7.3 px. Four of its points are on the
+          wooden sign and railing at the bottom of photo 9, a meter or two
+          from the lens, three are on mid-distance trees (two on branch tips
+          of the tall pine in the middle), and the other four are on the
+          ridgeline and clouds. Template matching puts every click within
+          2 px of its feature, so these are not clicking errors. A handheld
+          turn moves the center of projection by a few centimeters, which
+          shifts the sign against the mountains, and no single homography can
+          match both. That pair only enters the cylindrical panorama, where
+          the sign sits at the far edge.
+        </p>
+      </div>
+    </section>
+
+    <section class="section" id="warp">
+      <div class="section-heading"><p class="part-no">Part A 3</p><h2>Warping and rectification</h2></div>
+      <div class="section-content">
+        <p>
+          Warping is done backwards. The four corners of the source go through
+          \(H\) to find the output bounding box. Then every output pixel is sent
+          through \(H^{-1}\) to a real-valued location in the source, and a
+          sampler decides what color lives there. Going backwards means every
+          output pixel gets exactly one value, with no holes. Pixel
+          \((0,0)\) is the center of the first pixel, so a point is inside the
+          source when \(-0.5\le x&lt;w-0.5\) for nearest neighbor and
+          \(0\le x\le w-1\) for bilinear. Output pixels that land outside get
+          alpha 0.
+        </p>
+        <div class="code-pair">
+          <div>
+            <p class="code-title">Nearest neighbor</p>
+            <pre class="code-block" tabindex="0" role="region" aria-label="Nearest neighbor sampling"><code>x_nn = np.floor(x_src + 0.5).astype(int)
+y_nn = np.floor(y_src + 0.5).astype(int)
+out[valid] = im[y_nn, x_nn]</code></pre>
+          </div>
+          <div>
+            <p class="code-title">Bilinear</p>
+            <pre class="code-block" tabindex="0" role="region" aria-label="Bilinear sampling"><code>x0, y0 = floor(x), floor(y);  dx, dy = x-x0, y-y0
+out = (1-dx)(1-dy) I00 + dx(1-dy) I10
+    + (1-dx) dy   I01 + dx dy     I11</code></pre>
+          </div>
+        </div>
+
+        <h3 class="content-heading" id="rectify-demo">Try it: rectify by dragging four corners</h3>
+        <p>
+          Rectification is a homography with a made-up target. Choose four
+          points that should be the corners of a rectangle, send them to the pixel centers
+          \((0,0),(w-1,0),(w-1,h-1),(0,h-1)\) of a \(w\times h\) output,
+          and warp. The demo below runs the same
+          math in the browser. It solves the 8 × 8 system for the map from the
+          output rectangle back to your quadrilateral and samples the photo.
+        </p>
+        <figure class="playground" data-playground data-src="media/a3/hornet_src.jpg" data-corners='[[65.0, 262.0], [717.0, 262.0], [756.0, 764.0], [21.0, 761.0]]' data-size='[700, 515]'>
+          <div class="playground-stage">
+            <div class="playground-src">
+              <canvas class="pg-source" role="img" aria-label="Source photo with four draggable corners"></canvas>
+            </div>
+            <div class="playground-out">
+              <canvas class="pg-output" role="img" aria-label="Rectified output"></canvas>
+              <div class="explorer-controls" role="radiogroup" aria-label="Sampler">
+                <span class="explorer-label">Sampler</span>
+                <button type="button" role="radio" aria-checked="false" data-method="nearest">Nearest</button>
+                <button type="button" role="radio" aria-checked="true" data-method="bilinear">Bilinear</button>
+              </div>
+              <button type="button" class="pg-reset">Reset corners</button>
+              <div class="matrix-readout pg-matrix" aria-live="polite"></div>
+            </div>
+          </div>
+          <figcaption><span class="cap-text">Interactive. Drag a corner, or focus one with Tab and nudge it with the arrow keys. The output is drawn at low resolution and enlarged, so the two samplers are easy to tell apart. The matrix maps output pixels to source pixels, which is \(H^{-1}\) in the notation above.</span></figcaption>
+        </figure>
+
+        <p class="strip-label">USS Hornet strike board, photographed from below, so its bottom edge is wider than its top.</p><div class="rect-row"><figure class="quad-figure"><div class="quad-wrap"><img width="768" height="1024" src="media/a3/hornet_src.jpg" alt="Original photo: USS Hornet strike board, photographed from below, so its bottom edge is wider than its top." loading="lazy" decoding="async"><svg viewBox="0 0 768 1024" aria-hidden="true"><polygon points="65.0,262.0 717.0,262.0 756.0,764.0 21.0,761.0"/><circle cx="65.0" cy="262.0" r="7"/><circle cx="717.0" cy="262.0" r="7"/><circle cx="756.0" cy="764.0" r="7"/><circle cx="21.0" cy="761.0" r="7"/></svg></div><figcaption><span class="cap-text">Input with the four clicked corners.</span></figcaption></figure><figure><img width="700" height="515" src="media/a3/hornet_bilinear.jpg" alt="The board rectified to a fronto-parallel rectangle: its edges are axis-aligned and the rows and columns of flags run straight and evenly spaced" loading="lazy" decoding="async"><figcaption><span class="cap-text">Rectified, bilinear, 700 × 515.</span></figcaption></figure></div><figure class="rect-full"><img width="883" height="1069" src="media/a3/hornet_full.webp" alt="The whole photo pushed through the same homography: the ceiling and cables stretch into a wedge above the now-rectangular board" loading="lazy" decoding="async"><figcaption><span class="cap-text">The whole photo through the same \(H\). Everything off that plane is distorted, because \(H\) is only correct for the plane it was fit to.</span></figcaption></figure><p class="source-note">The board's true aspect ratio is unknown. I estimated it as 1.36 from the photo itself: with the focal length from the EXIF data, the corner homography must factor into a rotation and a translation, and that fixes the width-to-height ratio (it changes by less than 1% between f = 700 and 850 px). The target rectangle is 700 × 515.</p>
+        <p class="strip-label">Museum placard lying on a display case, shot at a steep angle from above and in front, so its top edge is short and far away.</p><div class="rect-row"><figure class="quad-figure"><div class="quad-wrap"><img width="768" height="1024" src="media/a3/placard_src.jpg" alt="Original photo: Museum placard lying on a display case, shot at a steep angle from above and in front, so its top edge is short and far away." loading="lazy" decoding="async"><svg viewBox="0 0 768 1024" aria-hidden="true"><polygon points="163.0,608.0 416.0,597.0 435.0,875.0 139.0,890.0"/><circle cx="163.0" cy="608.0" r="7"/><circle cx="416.0" cy="597.0" r="7"/><circle cx="435.0" cy="875.0" r="7"/><circle cx="139.0" cy="890.0" r="7"/></svg></div><figcaption><span class="cap-text">Input with the four clicked corners.</span></figcaption></figure><figure><img width="600" height="590" src="media/a3/placard_bilinear.jpg" alt="The placard rectified to a square-on view: lines of text run horizontally with even spacing, and the title is readable" loading="lazy" decoding="async"><figcaption><span class="cap-text">Rectified, bilinear, 600 × 590.</span></figcaption></figure></div><figure class="rect-full"><img width="1232" height="1400" src="media/a3/placard_full.webp" alt="The whole photo pushed through the same homography: the display case and model plane stretch into a wide fan above the now-square placard" loading="lazy" decoding="async"><figcaption><span class="cap-text">The whole photo through the same \(H\). Everything off that plane is distorted, because \(H\) is only correct for the plane it was fit to.</span></figcaption></figure><p class="source-note">The placard is nearly square: the same focal-length argument gives an aspect ratio of 1.02 (0.99 to 1.03 for f between 650 and 800 px). The target is 600 × 590. Every row is stretched about 2× vertically (2.4× at the far top edge, 1.8× at the near bottom), so the samplers have to invent more pixels here than for the board.</p>
+
+        <h3 class="content-heading" id="samplers">Nearest neighbor versus bilinear</h3>
+        <div class="p2-grid p2-grid-2 zoom-pair">
+          <figure><img class="pixelated" width="576" height="264" src="media/a3/hornet_nearest_zoom.png" alt="Nearest-neighbor crop of the board&#x27;s title letters: jagged, stair-stepped edges" loading="lazy" decoding="async"><figcaption><span class="cap-text">Nearest neighbor: “U.S.S.”, a 96 × 44 px crop enlarged 6×.</span></figcaption></figure>
+          <figure><img class="pixelated" width="576" height="264" src="media/a3/hornet_bilinear_zoom.png" alt="Bilinear crop of the board&#x27;s title letters: smooth but slightly soft edges" loading="lazy" decoding="async"><figcaption><span class="cap-text">Bilinear, same crop.</span></figcaption></figure>
+        </div>
+<div class="p2-grid p2-grid-2 zoom-pair">
+          <figure><img class="pixelated" width="576" height="264" src="media/a3/placard_nearest_zoom.png" alt="Nearest-neighbor crop of the placard&#x27;s title: jagged, stair-stepped edges" loading="lazy" decoding="async"><figcaption><span class="cap-text">Nearest neighbor: “B-25B”, a 96 × 44 px crop enlarged 6×.</span></figcaption></figure>
+          <figure><img class="pixelated" width="576" height="264" src="media/a3/placard_bilinear_zoom.png" alt="Bilinear crop of the placard&#x27;s title: smooth but slightly soft edges" loading="lazy" decoding="async"><figcaption><span class="cap-text">Bilinear, same crop.</span></figcaption></figure>
+        </div>
+        <p class="table-title" id="speed-title">Warp time, median of runs on an Apple M2, NumPy only</p>
+        <div class="table-scroll p2-table-wrap" tabindex="0" role="region" aria-labelledby="speed-title">
+          <table class="p2-table" aria-labelledby="speed-title">
+            <thead><tr><th scope="col">Output</th><th scope="col">Megapixels</th><th scope="col">Nearest (ms)</th><th scope="col">Bilinear (ms)</th><th scope="col">Ratio</th></tr></thead>
+            <tbody><tr><th scope="row">350 × 257</th><td>0.09</td><td>4</td><td>13</td><td>3.2×</td></tr><tr><th scope="row">700 × 515</th><td>0.36</td><td>16</td><td>51</td><td>3.1×</td></tr><tr><th scope="row">1400 × 1030</th><td>1.44</td><td>80</td><td>219</td><td>2.7×</td></tr></tbody>
+          </table>
+        </div>
+        <div class="reflection">
+          <h3>Speed against quality</h3>
+          <p>
+            Both samplers cost the same inverse mapping. The difference is
+            the lookup: nearest neighbor reads one pixel, bilinear reads four
+            and blends them. That makes bilinear about 3× slower
+            here, and both scale linearly with the number of output pixels.
+            Nearest neighbor copies each source pixel to a whole block of
+            output, so lines that should be straight become staircases and
+            fine repeated patterns shimmer. Bilinear trades that for a slight
+            blur, because it low-passes the image at subpixel positions. For
+            mosaics, where every image is resampled and then averaged,
+            bilinear's blur is invisible and the staircases are not, so every
+            mosaic uses bilinear.
+          </p>
+        </div>
+      </div>
+    </section>
+
+    <section class="section" id="mosaic">
+      <div class="section-heading"><p class="part-no">Part A 4</p><h2>Blending into a mosaic</h2></div>
+      <div class="section-content">
+        <p>
+          Correspondences only exist between neighbors, so <code>stitch</code>
+          chains them. The middle image is the reference, which keeps the
+          worst stretching symmetric. Every other image reaches it by
+          multiplying the neighbor homographies in between, inverting where the
+          chain runs the other way.
+        </p>
+        <ol class="pipeline-list">
+          <li><span class="pipeline-title">Chain to the reference.</span><span>\(H_{i\to r}=H_{i+1\to r}\,H_{i\to i+1}\) on the left of the reference and \(H_{i\to r}=H_{i-1\to r}\,H_{i-1\to i}^{-1}\) on the right.</span></li>
+          <li><span class="pipeline-title">Grow the canvas.</span><span>Images are added outward from the reference. Each step warps the next image's corners, takes the union with the current mosaic's box, and pre-multiplies a translation so the new top-left is \((0,0)\).</span></li>
+          <li><span class="pipeline-title">Warp with alpha.</span><span>The new image and the mosaic so far are both resampled into the new canvas. Color is premultiplied by alpha first, so empty pixels never bleed into edges.</span></li>
+          <li><span class="pipeline-title">Feather.</span><span>At each step there are two sources, the new image and the mosaic so far. Each gets a weight from a distance transform of its own coverage: 0 at the edge, rising linearly to 1 at its deepest pixel. Each output pixel is \((w_1c_1+w_2c_2)/(w_1+w_2)\). The mosaic counts as one region, so its weight comes from its outer boundary, not from the photos inside it.</span></li>
+        </ol>
+        <pre class="code-block" tabindex="0" role="region" aria-label="Feathering weights"><code>def feather_weights(mask):
+    padded = np.pad(mask.astype(np.uint8), 1)           # the border counts as an edge
+    dist = cv.distanceTransform(padded, cv.DIST_L2, 5)[1:-1, 1:-1]
+    return dist / dist.max()
+
+weight = alpha * feather_weights(alpha > 0)              # inside stitchImages
+sources.append(np.dstack((color * weight[:, :, None], weight, alpha)))</code></pre>
+
+        <h3 class="content-heading" id="feathering">Equal weights versus feathering</h3>
+        <p>
+          My first version averaged every overlapping pixel with equal
+          weight. Inside an overlap that is fine. At the overlap's border the
+          weight jumps from ½ to 1, and any difference in exposure becomes a
+          visible step. Auto-exposure shifts a little from frame to frame, so
+          each image's rectangle shows up in the sky. Drag the divider to compare.
+        </p>
+        <figure class="wipe" data-wipe>
+          <div class="explorer-controls" role="radiogroup" aria-label="Mosaic">
+            <span class="explorer-label">Mosaic</span>
+            <button type="button" role="radio" aria-checked="true" data-under="media/a4/mosaic1_average.webp" data-over="media/a4/mosaic1_feather.webp" data-w="1859" data-h="1099" data-note="Ridge: with equal weights, every photo&#x27;s rectangle shows in the sky as a lighter or darker band. Feathered, the sky is one gradient.">Ridge</button><button type="button" role="radio" aria-checked="false" data-under="media/a4/mosaic2_average.webp" data-over="media/a4/mosaic2_feather.webp" data-w="635" data-h="1399" data-note="Sequoia: exposure barely changed between these three shots, so the two blends look almost the same. Feathering matters where exposure differs, as in the ridge and the room.">Sequoia</button><button type="button" role="radio" aria-checked="false" data-under="media/a4/mosaic3_average.webp" data-over="media/a4/mosaic3_feather.webp" data-w="1588" data-h="1504" data-note="Room: the bright ceiling and the dark floor carried the clearest rectangles. Feathered, they are gone. Faint doubles on the chairs remain.">Room</button>
+          </div>
+          <div class="wipe-stage">
+            <img class="wipe-under" alt="" decoding="async">
+            <div class="wipe-over"><img alt="" decoding="async"></div>
+            <span class="wipe-label wipe-label-left">Equal weights</span>
+            <span class="wipe-label wipe-label-right">Feathered</span>
+            <input class="wipe-range" type="range" min="0" max="100" value="50" aria-label="Divider position: equal weights on the left, feathered on the right">
+          </div>
+          <figcaption class="explorer-note" aria-live="polite"></figcaption>
+        </figure>
+        <div class="weight-figure">
+          <figure>
+            <img width="512" height="683" src="media/a4/weight_image.jpg" alt="Feathering weight of one photo: bright in the middle, darkening linearly to the edges, with ridge-shaped level lines toward the corners" loading="lazy" decoding="async">
+            <figcaption><span class="cap-text">The weight of one 512 × 683 photo, light = 1. The distance transform gives a roof shape: level lines are concentric rectangles, and the ridge runs along the long axis.</span></figcaption>
+          </figure>
+          <p>
+            Because each weight reaches 0 exactly where its image ends, nothing
+            changes abruptly at a border. Inside an overlap, whichever source is
+            deeper inside its own coverage dominates, so the transition is
+            spread over the full overlap width instead of happening at one
+            line. Feathering does not fix misregistration, though. If
+            the two images disagree about where something is, a gentle
+            crossfade still shows both copies.
+          </p>
+        </div>
+
+        <h3 class="content-heading" id="canvas-growth">How the canvas grows</h3>
+        <figure class="explorer step-explorer" data-explorer>
+          <div class="explorer-controls" role="radiogroup" aria-label="Stitching step">
+            <span class="explorer-label">Step</span>
+            <button type="button" role="radio" aria-checked="false" data-src="media/a4/mosaic1_step1.webp" data-note="Step 1: warp photo 2 into the frame of reference photo 3, on the left. The canvas grows to hold it, and the old mosaic is shifted, not re-warped.">1</button><button type="button" role="radio" aria-checked="false" data-src="media/a4/mosaic1_step2.webp" data-note="Step 2: warp photo 1 into the frame of reference photo 3, on the left. The canvas grows to hold it, and the old mosaic is shifted, not re-warped.">2</button><button type="button" role="radio" aria-checked="false" data-src="media/a4/mosaic1_step3.webp" data-note="Step 3: warp photo 4 into the frame of reference photo 3, on the right. The canvas grows to hold it, and the old mosaic is shifted, not re-warped.">3</button><button type="button" role="radio" aria-checked="true" data-src="media/a4/mosaic1_step4.webp" data-note="Step 4: warp photo 5 into the frame of reference photo 3, on the right. The canvas grows to hold it, and the old mosaic is shifted, not re-warped.">4</button>
+          </div>
+          <img class="explorer-image" width="1400" height="828" src="media/a4/mosaic1_step4.webp" alt="Intermediate ridge mosaic at the selected step" loading="lazy" decoding="async">
+          <figcaption class="explorer-note" aria-live="polite">Step 4: warp photo 5 into the frame of reference photo 3, on the right. The canvas grows to hold it, and the old mosaic is shifted, not re-warped.</figcaption>
+        </figure>
+
+        <h3 class="content-heading" id="three-mosaics">Three mosaics</h3>
+        <div class="mosaic-block"><div class="t-strip mosaic-sources" style="--n: 5"><figure><img width="512" height="683" src="media/a1/set1_1.jpg" alt="Ridge source 1" loading="lazy" decoding="async"><figcaption>1</figcaption></figure><figure><img width="512" height="683" src="media/a1/set1_2.jpg" alt="Ridge source 2" loading="lazy" decoding="async"><figcaption>2</figcaption></figure><figure><img width="512" height="683" src="media/a1/set1_3.jpg" alt="Ridge source 3" loading="lazy" decoding="async"><figcaption>3</figcaption></figure><figure><img width="512" height="683" src="media/a1/set1_4.jpg" alt="Ridge source 4" loading="lazy" decoding="async"><figcaption>4</figcaption></figure><figure><img width="512" height="683" src="media/a1/set1_5.jpg" alt="Ridge source 5" loading="lazy" decoding="async"><figcaption>5</figcaption></figure></div><figure class="mosaic-result"><img width="1859" height="1099" src="media/a4/mosaic1_feather.webp" alt="Feathered ridge mosaic of 5 photos" loading="lazy" decoding="async"><figcaption><span class="cap-text">Ridge: 5 photos warped into photo 3's frame. Canvas 1859 × 1099, 72% covered.</span></figcaption></figure></div>
+        <div class="mosaic-block"><div class="t-strip mosaic-sources" style="--n: 3"><figure><img width="512" height="768" src="media/a1/set2_1.jpg" alt="Sequoia source 1" loading="lazy" decoding="async"><figcaption>1</figcaption></figure><figure><img width="512" height="768" src="media/a1/set2_2.jpg" alt="Sequoia source 2" loading="lazy" decoding="async"><figcaption>2</figcaption></figure><figure><img width="512" height="768" src="media/a1/set2_3.jpg" alt="Sequoia source 3" loading="lazy" decoding="async"><figcaption>3</figcaption></figure></div><figure class="mosaic-result mosaic-tall"><img width="635" height="1399" src="media/a4/mosaic2_feather.webp" alt="Feathered sequoia mosaic of 3 photos" loading="lazy" decoding="async"><figcaption><span class="cap-text">Sequoia: 3 photos warped into photo 2's frame. Canvas 635 × 1399, 84% covered.</span></figcaption></figure></div>
+        <div class="mosaic-block"><div class="t-strip mosaic-sources" style="--n: 5"><figure><img width="512" height="768" src="media/a1/set3_1.jpg" alt="Room source 1" loading="lazy" decoding="async"><figcaption>1</figcaption></figure><figure><img width="512" height="768" src="media/a1/set3_2.jpg" alt="Room source 2" loading="lazy" decoding="async"><figcaption>2</figcaption></figure><figure><img width="512" height="768" src="media/a1/set3_3.jpg" alt="Room source 3" loading="lazy" decoding="async"><figcaption>3</figcaption></figure><figure><img width="512" height="768" src="media/a1/set3_4.jpg" alt="Room source 4" loading="lazy" decoding="async"><figcaption>4</figcaption></figure><figure><img width="512" height="768" src="media/a1/set3_5.jpg" alt="Room source 5" loading="lazy" decoding="async"><figcaption>5</figcaption></figure></div><figure class="mosaic-result"><img width="1588" height="1504" src="media/a4/mosaic3_feather.webp" alt="Feathered room mosaic of 5 photos" loading="lazy" decoding="async"><figcaption><span class="cap-text">Room: 5 photos warped into photo 3's frame. Canvas 1588 × 1504, 66% covered.</span></figcaption></figure></div>
+
+        <h3 class="content-heading" id="photo-count">How many ridge photos fit on a plane?</h3>
+        <p>
+          The ridge sequence has nine photos. The mosaic above uses the
+          first five. Adding more shows why a plane runs out. A pixel at angle
+          \(\theta\) from the reference axis lands at \(x=f\tan\theta\) on the
+          reference plane, and its width is stretched by \(1/\cos^2\theta\).
+          Halfway to 90° the stretch is already 2×.
+        </p>
+        <figure class="explorer growth-explorer" data-explorer>
+          <div class="explorer-controls" role="radiogroup" aria-label="Number of photos">
+            <span class="explorer-label">Photos</span>
+            <button type="button" role="radio" aria-checked="true" data-src="media/a4/set1_n5.webp" data-note="5 photos: canvas 1859 × 1099 (2.0 MP), 72% of it covered.">5</button><button type="button" role="radio" aria-checked="false" data-src="media/a4/set1_n6.webp" data-note="6 photos: canvas 2493 × 1567 (3.9 MP), 60% of it covered.">6</button><button type="button" role="radio" aria-checked="false" data-src="media/a4/set1_n7.webp" data-note="7 photos: canvas 2845 × 1567 (4.5 MP), 59% of it covered.">7</button><button type="button" role="radio" aria-checked="false" data-src="media/a4/set1_n8.webp" data-note="8 photos: canvas 4031 × 2496 (10.1 MP), 50% of it covered.">8</button><button type="button" role="radio" aria-checked="false" data-src="media/a4/set1_n9.webp" data-note="9 photos: canvas 4576 × 2496 (11.4 MP), 49% of it covered.">9</button>
+          </div>
+          <img class="explorer-image" width="1600" height="946" src="media/a4/set1_n5.webp" alt="Planar ridge mosaic with the selected number of photos" loading="lazy" decoding="async">
+          <figcaption class="explorer-note" aria-live="polite">5 photos: canvas 1859 × 1099 (2.0 MP), 72% of it covered.</figcaption>
+        </figure>
+        <p class="table-title" id="growth-title">Planar ridge mosaics: the canvas grows much faster than the content</p>
+        <div class="table-scroll p2-table-wrap" tabindex="0" role="region" aria-labelledby="growth-title">
+          <table class="p2-table" aria-labelledby="growth-title">
+            <thead><tr><th scope="col">Photos</th><th scope="col">Canvas (px)</th><th scope="col">Megapixels</th><th scope="col">Covered</th></tr></thead>
+            <tbody><tr><th scope="row">5</th><td>1859 × 1099</td><td>2.0</td><td>72%</td></tr><tr><th scope="row">6</th><td>2493 × 1567</td><td>3.9</td><td>60%</td></tr><tr><th scope="row">7</th><td>2845 × 1567</td><td>4.5</td><td>59%</td></tr><tr><th scope="row">8</th><td>4031 × 2496</td><td>10.1</td><td>50%</td></tr><tr><th scope="row">9</th><td>4576 × 2496</td><td>11.4</td><td>49%</td></tr></tbody>
+          </table>
+        </div>
+        <div class="reflection">
+          <h3>What went right, and what did not</h3>
+          <p>
+            Feathering removed every exposure seam in the three mosaics. The
+            sky of the ridge and the ceiling of the room are now continuous.
+            What remains is geometry. My first sequoia mosaic had a doubled
+            canopy at the upper right. Its six points for photos 2 → 3 all sat
+            in one band across the middle of the overlap. \(H\) fit them to
+            0.38 px, but it had to extrapolate into the canopy, where an
+            independent feature-matching check put it off by about 11 px on
+            average and up to 74 px. A low error at the clicked points says
+            nothing about the parts of the overlap without any. I re-clicked
+            13 points spread over the whole overlap, including the canopy
+            (0.96 px), and the ghost is gone. The rest is parallax
+            from handheld drift, which no homography can remove. The lower
+            branches of the near pine in the middle of the ridge mosaic smear
+            where neighboring photos overlap. In the room, the chairs and the
+            right-hand table, a meter or two from the camera, show faint
+            doubles. Five ridge photos
+            fill 72% of the planar canvas; nine fill only 49%, and the
+            outermost trees are smeared several-fold. Beyond about five photos
+            the plane is the wrong surface, which is where A.5 starts.
+          </p>
+        </div>
+      </div>
+    </section>
+
+    <section class="section" id="cylinder">
+      <div class="section-heading"><p class="part-no">Part A 5</p><h2>Bells &amp; whistles: a cylindrical panorama</h2></div>
+      <div class="section-content">
+        <p>
+          A cylinder of radius \(f\) around the camera keeps every horizontal
+          direction at the same scale. Position along the cylinder is
+          proportional to angle, so a 360° pan would only need a strip
+          \(2\pi f\) wide. Each image is projected onto it by inverse sampling,
+          computing a source position for every cylinder pixel, with the
+          same bilinear sampler and premultiplied alpha as before.
+        </p>
+        <div class="formula">
+          \[
+            \theta=\frac{u}{f},\quad
+            x = f\tan\theta,\quad
+            y = \frac{v}{\cos\theta}
+            \qquad\Longleftrightarrow\qquad
+            u = f\arctan\frac{x}{f},\quad
+            v = \frac{f\,y}{\sqrt{x^2+f^2}}
+          \]
+        </div>
+        <p>
+          After this warp a pure pan is a pure horizontal shift, so each
+          neighbor pair is aligned by the mean offset of its correspondences,
+          mapped onto the cylinder, and the same <code>stitch</code> and
+          feathering run with <code>fit=fitTranslation</code> in place of
+          <code>computeH</code>. The one free parameter is \(f\) in pixels. I
+          chose it as the value that makes the cylinder correspondences most
+          consistent with pure translation.
+        </p>
+        <figure class="cyl-chart">
+          <svg viewBox="0 0 640 280" role="img" aria-labelledby="cyl-chart-title">
+            <title id="cyl-chart-title">Translation residual on the cylinder against radius f: falls from about 12 px at 400 to a flat minimum of 5.49 px at 1010 px</title>
+            <line class="grid" x1="56" x2="620" y1="234.0" y2="234.0"/><text class="tick" x="48" y="238.0" text-anchor="end">0</text><line class="grid" x1="56" x2="620" y1="190.8" y2="190.8"/><text class="tick" x="48" y="194.8" text-anchor="end">4</text><line class="grid" x1="56" x2="620" y1="147.6" y2="147.6"/><text class="tick" x="48" y="151.6" text-anchor="end">8</text><line class="grid" x1="56" x2="620" y1="104.4" y2="104.4"/><text class="tick" x="48" y="108.4" text-anchor="end">12</text><line class="grid" x1="56" x2="620" y1="61.2" y2="61.2"/><text class="tick" x="48" y="65.2" text-anchor="end">16</text><line class="grid" x1="56" x2="620" y1="18.0" y2="18.0"/><text class="tick" x="48" y="22.0" text-anchor="end">20</text><line class="axis-tick" x1="56.0" x2="56.0" y1="234" y2="239"/><text class="tick" x="56.0" y="253" text-anchor="middle">300</text><line class="axis-tick" x1="150.0" x2="150.0" y1="234" y2="239"/><text class="tick" x="150.0" y="253" text-anchor="middle">500</text><line class="axis-tick" x1="244.0" x2="244.0" y1="234" y2="239"/><text class="tick" x="244.0" y="253" text-anchor="middle">700</text><line class="axis-tick" x1="338.0" x2="338.0" y1="234" y2="239"/><text class="tick" x="338.0" y="253" text-anchor="middle">900</text><line class="axis-tick" x1="432.0" x2="432.0" y1="234" y2="239"/><text class="tick" x="432.0" y="253" text-anchor="middle">1100</text><line class="axis-tick" x1="526.0" x2="526.0" y1="234" y2="239"/><text class="tick" x="526.0" y="253" text-anchor="middle">1300</text><line class="axis-tick" x1="620.0" x2="620.0" y1="234" y2="239"/><text class="tick" x="620.0" y="253" text-anchor="middle">1500</text>
+            <line class="axis" x1="56" x2="620" y1="234" y2="234"/>
+            <path class="series" d="M56.0,28.8 L60.7,38.9 L65.4,48.3 L70.1,57.0 L74.8,65.2 L79.5,72.8 L84.2,79.9 L88.9,86.5 L93.6,92.7 L98.3,98.5 L103.0,103.9 L107.7,109.0 L112.4,113.7 L117.1,118.1 L121.8,122.2 L126.5,126.0 L131.2,129.6 L135.9,132.9 L140.6,136.0 L145.3,138.9 L150.0,141.6 L154.7,144.1 L159.4,146.5 L164.1,148.7 L168.8,150.7 L173.5,152.6 L178.2,154.4 L182.9,156.0 L187.6,157.5 L192.3,159.0 L197.0,160.3 L201.7,161.5 L206.4,162.6 L211.1,163.6 L215.8,164.6 L220.5,165.5 L225.2,166.3 L229.9,167.1 L234.6,167.8 L239.3,168.4 L244.0,169.0 L248.7,169.6 L253.4,170.1 L258.1,170.6 L262.8,171.0 L267.5,171.4 L272.2,171.7 L276.9,172.1 L281.6,172.3 L286.3,172.6 L291.0,172.9 L295.7,173.1 L300.4,173.3 L305.1,173.5 L309.8,173.6 L314.5,173.8 L319.2,173.9 L323.9,174.0 L328.6,174.1 L333.3,174.2 L338.0,174.3 L342.7,174.4 L347.4,174.4 L352.1,174.5 L356.8,174.5 L361.5,174.6 L366.2,174.6 L370.9,174.6 L375.6,174.7 L380.3,174.7 L385.0,174.7 L389.7,174.7 L394.4,174.7 L399.1,174.7 L403.8,174.7 L408.5,174.7 L413.2,174.6 L417.9,174.6 L422.6,174.6 L427.3,174.6 L432.0,174.6 L436.7,174.5 L441.4,174.5 L446.1,174.5 L450.8,174.4 L455.5,174.4 L460.2,174.4 L464.9,174.3 L469.6,174.3 L474.3,174.3 L479.0,174.2 L483.7,174.2 L488.4,174.1 L493.1,174.1 L497.8,174.1 L502.5,174.0 L507.2,174.0 L511.9,174.0 L516.6,173.9 L521.3,173.9 L526.0,173.8 L530.7,173.8 L535.4,173.7 L540.1,173.7 L544.8,173.7 L549.5,173.6 L554.2,173.6 L558.9,173.6 L563.6,173.5 L568.3,173.5 L573.0,173.4 L577.7,173.4 L582.4,173.3 L587.1,173.3 L591.8,173.3 L596.5,173.2 L601.2,173.2 L605.9,173.2 L610.6,173.1 L615.3,173.1 L620.0,173.0"/>
+            <line class="best-line" x1="389.7" x2="389.7" y1="18" y2="234"/>
+            <circle class="best-dot" cx="389.7" cy="174.7" r="5"/>
+            <text class="best-label" x="398.7" y="30">f = 1010 px</text>
+            <text class="axis-title" x="338.0" y="274" text-anchor="middle">Cylinder radius f (px)</text>
+            <text class="axis-title" transform="translate(14 126.0) rotate(-90)" text-anchor="middle">RMS residual (px)</text>
+          </svg>
+          <figcaption><span class="cap-text">For each radius, all eight ridge pairs are mapped onto the cylinder and aligned by their best translation. The curve is the RMS distance left over.</span></figcaption>
+        </figure>
+        <p>
+          The residual drops steeply below 700 px and is nearly flat from 800
+          to 1200 px, with its minimum of 5.49 px at
+          \(f=1010\) px. For a 512 × 683 image that is a horizontal
+          field of view of 28°, a 35 mm equivalent of about 51 mm,
+          though the flat stretch spans roughly 41–61 mm. That fits a phone's
+          2× setting (48–52 mm) much better than its 1× main lens (24–26 mm,
+          which would be \(f\approx 470\)–\(510\) px). Most of the
+          floor of about 5 px comes from the last pair, 8 → 9 (13.8 px on its
+          own), where the sign and railing shift against the mountains. The
+          other seven pairs leave about 2.7 px, the small tilt and roll
+          between shots that a translation cannot model. Without 8 → 9 the
+          minimum moves to 900 px, still inside the flat stretch.
+        </p>
+        <div class="p3-table cyl-warps" style="--cols: 3" role="group" aria-label="One photo projected onto cylinders of three radii">
+          <span></span><span class="p3-col">\(f=400\) px</span><span class="p3-col">\(f=700\) px</span><span class="p3-col">\(f=1010\) px (fitted)</span><span class="p3-row">Photo 5</span><img width="456" height="683" src="media/a5/cyl_warp_f400.jpg" alt="Ridge photo 5 projected onto a cylinder of radius 400 px" loading="lazy" decoding="async"><img width="491" height="683" src="media/a5/cyl_warp_f700.jpg" alt="Ridge photo 5 projected onto a cylinder of radius 700 px" loading="lazy" decoding="async"><img width="502" height="683" src="media/a5/cyl_warp_f1010.jpg" alt="Ridge photo 5 projected onto a cylinder of radius 1010 px" loading="lazy" decoding="async"><span></span><span class="p3-foot">456 px wide</span><span class="p3-foot">491 px wide</span><span class="p3-foot">502 px wide</span>
+        </div>
+        <p>
+          A smaller radius bends the photo harder. At \(f=400\) px the top
+          and bottom edges bow into arcs and the 512 px width shrinks to
+          456 px, because the edges are squeezed by
+          \(\arctan(x/f)\). The trunks stay vertical at every radius, since
+          a cylinder maps vertical lines to vertical lines. At the fitted
+          radius the photo is barely changed (502 px wide), and that
+          small correction is enough to make the nine photos chain without
+          kinks. The full panorama is at the top of the page.
+        </p>
+        <figure class="feature-figure cyl-compare">
+          <figure><img width="1600" height="873" src="media/a4/set1_n9.webp" alt="Planar mosaic of all nine ridge photos: a bow-tie shape with the outer photos stretched enormously" loading="lazy" decoding="async"><figcaption><span class="cap-text">Planar, nine photos: 4576 × 2496, 49% covered.</span></figcaption></figure><figure><img width="2062" height="755" src="media/a5/cyl_set1.webp" alt="Cylindrical mosaic of the same nine photos: a long, even strip" loading="lazy" decoding="async"><figcaption><span class="cap-text">Cylindrical, nine photos: 2062 × 755.</span></figcaption></figure>
+        </figure>
+        <div class="reflection">
+          <h3>Plane versus cylinder</h3>
+          <p>
+            The planar mosaic of all nine photos needs a 4576 × 2496 canvas
+            and leaves half of it empty. The cylindrical one is
+            2062 × 755 with every photo at its native scale. The cost is
+            that straight lines that are not vertical now curve: the horizon
+            stays level only because the pan was nearly level. Its staircase
+            top and bottom edges are the vertical drift of a handheld pan,
+            which a translation-only model leaves in rather than spreads out.
+          </p>
+        </div>
+      </div>
+    </section>
+
+    <!-- ============================================================ PART B -->
+
+    <section class="section part-intro" id="part-b">
+      <div class="section-heading"><p class="part-no">Part B</p><h2>Feature matching for autostitching</h2></div>
+      <div class="section-content">
+        <p>
+          Part B replaces the clicking with Harris corners, adaptive
+          non-maximal suppression, MOPS-style descriptors, ratio-test matching
+          and RANSAC, following Brown et al. The results will be added here,
+          next to the hand-stitched mosaics above for comparison.
+        </p>
+        <ol class="partb-list">
+          <li><span class="part-no">B.1</span>Harris corners, with and without ANMS</li>
+          <li><span class="part-no">B.2</span>Normalized 8 × 8 feature descriptors</li>
+          <li><span class="part-no">B.3</span>Feature matching with Lowe's ratio test</li>
+          <li><span class="part-no">B.4</span>4-point RANSAC and automatic mosaics</li>
+          <li><span class="part-no">B.5</span>Bells &amp; whistles</li>
+        </ol>
+      </div>
+    </section>
+
+    <section class="section conclusion-section" id="learned">
+      <div class="section-heading"><h2>What I learned</h2></div>
+      <div class="section-content">
+        <p class="conclusion-copy">
+          The homography is the easy part. Eight numbers fall out of one SVD,
+          as long as the coordinates are normalized first. Almost everything
+          that went wrong came from the assumptions around it. The camera has
+          to turn about its optical center, or nearby objects double. Exposure
+          changes between frames, so equal-weight blending draws every
+          rectangle. A plane can only hold so much angle. Each fix (shooting
+          distant scenes, feathering, a cylinder) answers one of those
+          assumptions rather than the matrix.
+        </p>
+      </div>
+    </section>
+  </main>
+  </div>
+
+  <footer class="footer">
+    <div class="wrap">
+      <p><a href="mailto:zyzhu@berkeley.edu">Zhenyan Zhu</a> · CS180, Fall 2026</p>
+    </div>
+  </footer>
+
+  <script type="application/json" id="p4-data">{"sets":{"set1":{"size":[512,683],"label":"Ridge"},"set2":{"size":[512,768],"label":"Sequoia"},"set3":{"size":[512,768],"label":"Room"}},"pairs":[{"set":"set1","i":1,"j":2,"n":11,"p1":[[362.0,374.0],[445.0,340.0],[302.0,419.0],[394.0,306.0],[323.0,447.0],[254.0,447.0],[476.0,324.0],[293.0,389.0],[387.0,418.0],[282.0,610.0],[362.0,609.0]],"p2":[[119.0,360.0],[201.0,328.0],[55.0,405.0],[150.0,289.0],[79.0,436.0],[7.0,435.0],[231.0,308.0],[47.0,373.0],[143.0,400.0],[32.0,602.0],[115.0,593.0]],"proj":[[118.62,358.62],[200.72,324.79],[56.38,405.22],[151.74,290.0],[77.8,433.42],[5.09,435.33],[230.43,309.33],[47.31,374.34],[142.84,402.74],[33.15,601.32],[114.9,593.88]],"err":[1.43,3.22,1.4,2.01,2.84,1.94,1.44,1.38,2.74,1.33,0.89],"rmse":2.0067341473453464,"max":3.2234624791307698,"H":[[1.217023531869019,-0.010720978380491446,-298.5923081495498],[0.13396626734727918,1.2041981417022747,-81.7747866330432],[0.0003809639329027275,6.717715450179524e-05,1.0]]},{"set":"set1","i":2,"j":3,"n":11,"p1":[[461.0,151.0],[331.0,447.0],[404.0,430.0],[306.0,432.0],[343.0,473.0],[464.0,568.0],[302.0,361.0],[384.0,302.0],[380.0,379.0],[273.0,429.0],[427.0,207.0]],"p2":[[231.0,139.0],[103.0,434.0],[176.0,414.0],[79.0,418.0],[118.0,456.0],[234.0,544.0],[75.0,346.0],[159.0,286.0],[155.0,364.0],[44.0,414.0],[200.0,193.0]],"proj":[[232.19,139.28],[104.87,432.19],[177.26,413.64],[79.1,417.64],[117.14,457.84],[233.7,544.07],[74.44,345.16],[157.56,286.48],[153.74,363.47],[44.44,415.27],[199.56,192.96]],"err":[1.22,2.6,1.31,0.38,2.03,0.3,1.01,1.52,1.36,1.34,0.44],"rmse":1.3990163788986558,"max":2.601831919435188,"H":[[1.2366103471072696,0.013952234367649995,-292.6242494439181],[0.14953365356053605,1.2106852480726094,-84.04574123074005],[0.00041769996147342393,7.600106032308818e-05,1.0]]},{"set":"set1","i":3,"j":4,"n":11,"p1":[[231.0,139.0],[392.0,375.0],[319.0,332.0],[346.0,484.0],[375.0,261.0],[446.0,262.0],[262.0,196.0],[287.0,230.0],[300.0,291.0],[188.0,226.0],[181.0,250.0]],"p2":[[67.0,127.0],[232.0,363.0],[163.0,321.0],[191.0,474.0],[216.0,250.0],[281.0,254.0],[101.0,185.0],[126.0,220.0],[143.0,282.0],[24.0,213.0],[17.0,240.0]],"proj":[[67.97,126.28],[233.47,363.1],[161.56,322.18],[191.58,473.48],[214.59,251.58],[281.08,252.92],[101.18,185.15],[127.34,219.92],[141.71,281.26],[23.84,214.15],[16.67,238.99]],"err":[1.21,1.47,1.86,0.78,2.12,1.08,0.24,1.34,1.49,1.16,1.06],"rmse":1.3455648563556757,"max":2.1171106439336933,"H":[[1.1492695113394307,0.017106387006398084,-194.72786789636964],[0.09496119840828877,1.087465004007197,-37.234149870065174],[0.00035301114602813465,-4.081173483774324e-05,1.0]]},{"set":"set1","i":4,"j":5,"n":11,"p1":[[460.0,269.0],[283.0,254.0],[398.0,406.0],[316.0,312.0],[472.0,548.0],[488.0,277.0],[279.0,323.0],[378.0,268.0],[294.0,562.0],[440.0,261.0],[311.0,275.0]],"p2":[[236.0,252.0],[58.0,234.0],[180.0,386.0],[94.0,294.0],[245.0,528.0],[262.0,262.0],[55.0,304.0],[155.0,251.0],[70.0,547.0],[217.0,245.0],[89.0,257.0]],"proj":[[235.99,253.19],[59.69,234.01],[175.43,388.06],[93.44,293.52],[246.98,526.7],[262.71,261.59],[55.38,304.23],[155.93,250.42],[70.31,547.4],[216.73,244.88],[88.42,256.0]],"err":[1.19,1.69,5.01,0.74,2.37,0.82,0.45,1.09,0.51,0.29,1.16],"rmse":1.890499853692107,"max":5.0122763455530635,"H":[[1.1132105105711534,-0.002680152798763121,-250.87630854921224],[0.0809644571135066,1.0822462285067636,-48.909230245291454],[0.00022715811498207257,-2.7506465345589075e-06,1.0]]},{"set":"set1","i":5,"j":6,"n":11,"p1":[[262.0,263.0],[312.0,246.0],[483.0,405.0],[422.0,266.0],[235.0,254.0],[344.0,507.0],[477.0,463.0],[355.0,243.0],[489.0,338.0],[266.0,521.0],[295.0,560.0]],"p2":[[84.0,258.0],[136.0,241.0],[305.0,395.0],[243.0,262.0],[56.0,250.0],[173.0,501.0],[299.0,453.0],[177.0,239.0],[309.0,334.0],[91.0,523.0],[122.0,559.0]],"proj":[[83.99,258.27],[135.15,241.82],[304.25,396.23],[243.84,262.64],[55.52,248.86],[171.66,502.47],[299.89,452.47],[178.2,239.46],[308.38,331.83],[91.66,521.42],[122.48,559.55]],"err":[0.27,1.18,1.44,1.05,1.24,1.99,1.04,1.28,2.26,1.72,0.73],"rmse":1.3969562215102924,"max":2.261229801057557,"H":[[1.1345999335489203,0.01037583039580995,-210.57321713773638],[0.08566302637774813,1.0634838906400603,-27.15652539963297],[0.00029224164415395283,-4.506806534061234e-05,1.0]]},{"set":"set1","i":6,"j":7,"n":11,"p1":[[386.0,29.0],[466.0,85.0],[244.0,261.0],[351.0,139.0],[419.0,122.0],[177.0,239.0],[331.0,280.0],[303.0,395.0],[208.0,595.0],[496.0,116.0],[417.0,179.0]],"p2":[[217.0,43.0],[295.0,102.0],[82.0,274.0],[186.0,151.0],[250.0,135.0],[9.0,250.0],[168.0,291.0],[144.0,406.0],[48.0,616.0],[328.0,131.0],[250.0,191.0]],"proj":[[217.29,44.01],[296.11,100.51],[79.77,272.44],[185.35,151.13],[251.73,135.52],[9.6,250.27],[168.61,291.03],[142.93,406.99],[48.93,615.88],[325.5,131.02],[251.19,191.21]],"err":[1.05,1.86,2.72,0.66,1.8,0.66,0.61,1.46,0.94,2.5,1.21],"rmse":1.5711425034376982,"max":2.7163889169682585,"H":[[1.0761473934415682,0.01828689536223399,-185.04148347520717],[0.04028869064273406,1.034790605886153,1.203988431314669],[0.00016445575766569522,-3.1818895443366814e-05,1.0]]},{"set":"set1","i":7,"j":8,"n":11,"p1":[[218.0,43.0],[325.0,131.0],[183.0,160.0],[381.0,233.0],[253.0,136.0],[363.0,216.0],[340.0,567.0],[406.0,433.0],[250.0,192.0],[304.0,482.0],[175.0,241.0]],"p2":[[53.0,15.0],[164.0,110.0],[16.0,133.0],[221.0,217.0],[90.0,111.0],[204.0,197.0],[177.0,546.0],[244.0,415.0],[87.0,168.0],[138.0,462.0],[7.0,217.0]],"proj":[[53.45,14.43],[164.81,110.09],[15.77,133.3],[221.28,215.47],[89.73,111.86],[203.05,197.7],[175.76,546.17],[244.16,415.19],[86.19,168.92],[139.83,461.9],[6.97,215.98]],"err":[0.73,0.81,0.38,1.56,0.91,1.18,1.25,0.25,1.22,1.84,1.02],"rmse":1.1069454601076503,"max":1.837384490914157,"H":[[1.086558003559763,-0.0036752813604086425,-182.1175486878728],[0.057653975549869854,1.0568755382491815,-43.27597724698331],[9.050606243733188e-05,4.06934225472642e-05,1.0]]},{"set":"set1","i":8,"j":9,"n":11,"p1":[[426.0,620.0],[386.0,624.0],[478.0,645.0],[321.0,237.0],[445.0,199.0],[404.0,615.0],[221.0,217.0],[460.0,180.0],[288.0,503.0],[398.0,191.0],[374.0,200.0]],"p2":[[199.0,639.0],[160.0,648.0],[252.0,658.0],[122.0,250.0],[240.0,211.0],[177.0,635.0],[13.0,231.0],[251.0,192.0],[97.0,521.0],[199.0,204.0],[174.0,212.0]],"proj":[[202.35,638.33],[166.82,642.73],[246.77,660.69],[119.42,251.56],[239.64,212.24],[183.11,634.0],[22.43,227.83],[254.93,191.68],[81.68,527.51],[195.15,202.51],[171.72,211.95]],"err":[3.41,8.62,5.89,3.01,1.29,6.19,9.95,3.94,16.64,4.12,2.28],"rmse":7.281538613389165,"max":16.641560455287983,"H":[[1.0523366032067254,-0.006311072848232355,-207.2693180553888],[0.04097956850911629,1.2321067168990516,-33.35932442259534],[9.357122885451771e-05,0.00021281958751553787,1.0]]},{"set":"set2","i":1,"j":2,"n":6,"p1":[[302.0,438.0],[344.0,228.0],[175.0,46.0],[252.0,159.0],[68.0,309.0],[268.0,262.0]],"p2":[[323.0,674.0],[348.0,454.0],[177.0,297.0],[251.0,394.0],[75.0,554.0],[274.0,492.0]],"proj":[[322.24,674.53],[347.2,453.42],[175.6,297.35],[253.13,394.09],[75.07,553.68],[274.75,491.94]],"err":[0.93,0.99,1.44,2.13,0.33,0.76],"rmse":1.233319552520252,"max":2.1284452118559334,"H":[[0.9261217169036501,-0.024816590129187497,12.8750390041386],[-0.05412157725190482,0.7710087755086867,268.3048820719751],[2.0720598580067692e-05,-0.00030154291312358496,1.0]]},{"set":"set2","i":2,"j":3,"n":13,"p1":[[175.0,298.0],[131.0,200.0],[164.0,254.0],[10.0,104.0],[346.0,456.0],[252.0,388.0],[331.0,175.0],[157.0,156.0],[55.0,234.0],[94.0,186.0],[450.0,101.0],[304.0,119.0],[241.0,126.0]],"p2":[[193.0,493.0],[146.0,399.0],[179.0,450.0],[31.0,316.0],[373.0,652.0],[272.0,585.0],[341.0,369.0],[171.0,357.0],[72.0,434.0],[110.0,387.0],[451.0,296.0],[311.0,318.0],[251.0,326.0]],"proj":[[191.18,493.41],[146.34,399.45],[179.41,450.33],[30.9,314.77],[373.62,652.76],[272.05,583.01],[340.53,368.78],[170.98,357.19],[72.25,434.61],[110.38,387.49],[450.95,295.97],[311.36,317.76],[251.06,326.46]],"err":[1.87,0.57,0.52,1.23,0.98,1.99,0.52,0.19,0.66,0.62,0.06,0.43,0.47],"rmse":0.9631610775760239,"max":1.9904461334773247,"H":[[0.9197040254741329,-0.025864210523026544,23.625309169978106],[-0.043466176008531185,0.8075996750348639,223.413542975931],[-2.6255513627352393e-05,-0.0002358182047954207,1.0]]},{"set":"set3","i":1,"j":2,"n":8,"p1":[[468.0,546.0],[496.0,488.0],[135.0,410.0],[289.0,287.0],[332.0,178.0],[231.0,327.0],[277.0,322.0],[99.0,316.0]],"p2":[[394.0,532.0],[419.0,476.0],[58.0,415.0],[225.0,287.0],[266.0,180.0],[165.0,328.0],[213.0,324.0],[16.0,311.0]],"proj":[[394.54,531.81],[418.22,476.96],[59.1,414.68],[224.81,287.19],[266.63,180.51],[164.9,326.7],[212.95,322.19],[14.84,312.98]],"err":[0.57,1.24,1.15,0.27,0.81,1.3,1.81,2.3],"rmse":1.329725276623539,"max":2.295860708973426,"H":[[1.288841682340519,0.01925026664132279,-117.9360530318383],[0.18038472306540249,1.17267589692514,-56.46637813200521],[0.000511148926777563,3.171262323543737e-05,1.0]]},{"set":"set3","i":2,"j":3,"n":8,"p1":[[392.0,531.0],[474.0,542.0],[417.0,480.0],[470.0,482.0],[468.0,392.0],[468.0,269.0],[224.0,289.0],[251.0,428.0]],"p2":[[265.0,523.0],[334.0,520.0],[286.0,469.0],[329.0,467.0],[324.0,387.0],[323.0,280.0],[88.0,282.0],[122.0,432.0]],"proj":[[265.4,521.7],[333.54,520.3],[286.01,470.06],[328.94,466.84],[325.17,387.02],[322.19,279.83],[88.64,281.81],[121.1,432.45]],"err":[1.36,0.55,1.06,0.17,1.17,0.83,0.67,1.01],"rmse":0.9226036774993941,"max":1.3609155252137568,"H":[[1.6128013762757263,-0.009215586959722858,-248.04467489995827],[0.4616059604057962,1.307877644881893,-129.88621851012635],[0.0012907545200004395,-0.000144831141148426,1.0]]},{"set":"set3","i":3,"j":4,"n":8,"p1":[[266.0,523.0],[286.0,469.0],[332.0,521.0],[329.0,467.0],[326.0,387.0],[323.0,280.0],[410.0,276.0],[412.0,388.0]],"p2":[[204.0,525.0],[223.0,469.0],[269.0,517.0],[266.0,465.0],[261.0,386.0],[258.0,282.0],[339.0,279.0],[341.0,386.0]],"proj":[[203.95,524.67],[223.41,469.27],[268.73,517.28],[265.34,464.77],[261.67,386.59],[257.73,281.54],[338.7,279.39],[341.48,385.49]],"err":[0.34,0.49,0.39,0.7,0.89,0.54,0.49,0.69],"rmse":0.5929402775318575,"max":0.894369800712253,"H":[[1.2476709625826061,0.014553313062455341,-107.69565602791025],[0.16079974294513194,1.1458648559923497,-45.745479659366886],[0.0004900524724053503,1.1860373796059228e-05,1.0]]},{"set":"set3","i":4,"j":5,"n":8,"p1":[[205.0,528.0],[223.0,470.0],[270.0,520.0],[266.0,465.0],[341.0,387.0],[339.0,281.0],[437.0,281.0],[435.0,387.0]],"p2":[[69.0,548.0],[91.0,480.0],[145.0,527.0],[138.0,471.0],[215.0,386.0],[212.0,282.0],[298.0,288.0],[302.0,383.0]],"proj":[[68.92,547.64],[90.07,480.09],[144.98,528.1],[139.48,470.02],[215.63,385.7],[211.02,282.72],[299.13,287.52],[300.78,383.21]],"err":[0.37,0.93,1.1,1.77,0.7,1.22,1.22,1.23],"rmse":1.1376212733423963,"max":1.7748051738515442,"H":[[1.4893861494392158,0.0049136501173563316,-229.1876402162795],[0.3611389220655396,1.225744985340097,-95.60697738699285],[0.0010323820713162254,-0.00013113695093953465,1.0]]}]}</script>
+  <script src="project4.js" defer></script>
+</body>
+</html>

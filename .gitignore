@@ -4,6 +4,7 @@ __pycache__/
 docs/
 code/
 data/
+assets/
 web/
 *.tif
 note.*
