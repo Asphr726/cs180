@@ -8,3 +8,6 @@ assets/
 web/
 *.tif
 note.*
+
+# Submission archive contains private assignment source.
+submission.zip

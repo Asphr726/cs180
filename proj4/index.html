@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <meta name="description" content="CS180 Project 4A: homographies from hand-picked correspondences, inverse warping with nearest-neighbor and bilinear sampling, rectification, feathered planar mosaics, and a cylindrical panorama.">
+  <meta name="description" content="CS180 Project 4A+B: homographies from hand-picked correspondences, inverse warping with nearest-neighbor and bilinear sampling, rectification, feathered planar mosaics, and a cylindrical panorama.">
   <title>Stitching Photo Mosaics — Project 4 | CS180</title>
   <link rel="stylesheet" href="../style.css">
   <script>
@@ -36,8 +36,7 @@
             Photos taken from one spot while the camera turns are related by
             a homography, a 3 × 3 matrix. Part A recovers it from
             hand-picked correspondences, then uses it to rectify planes, warp
-            images into a shared frame, feather them into mosaics, and finally
-            wrap a 117° view onto a cylinder.
+            images into a shared frame, feather them into mosaics, and wrap a 117° view onto a cylinder. Part B replaces manual correspondences with feature matching and robust estimation.
           </p>
         </div>
       </div>
@@ -59,24 +58,24 @@
       <ol class="toc-list">
         <li><a href="#overview"><span class="toc-text">Overview</span></a></li>
         <li class="toc-group">
-          <a href="#part-a"><span class="toc-no">A</span><span class="toc-text">Warping and mosaicing</span></a>
+          <a href="#part-a"><span class="toc-no">A</span><span class="toc-text">Image Warping and Mosaicing</span></a>
           <ol>
-            <li><a href="#shoot"><span class="toc-no">A.1</span><span class="toc-text">Shooting the pictures</span></a></li>
+            <li><a href="#shoot"><span class="toc-no">A.1</span><span class="toc-text">Shoot the Pictures</span></a></li>
             <li>
-              <a href="#homography"><span class="toc-no">A.2</span><span class="toc-text">Recovering homographies</span></a>
+              <a href="#homography"><span class="toc-no">A.2</span><span class="toc-text">Recover Homographies</span></a>
               <ol class="toc-sub">
                 <li><a href="#correspondences">Correspondences and \(H\)</a></li>
               </ol>
             </li>
             <li>
-              <a href="#warp"><span class="toc-no">A.3</span><span class="toc-text">Warping and rectification</span></a>
+              <a href="#warp"><span class="toc-no">A.3</span><span class="toc-text">Warp the Images</span></a>
               <ol class="toc-sub">
                 <li><a href="#rectify-demo">Drag-to-rectify demo</a></li>
                 <li><a href="#samplers">Nearest vs bilinear</a></li>
               </ol>
             </li>
             <li>
-              <a href="#mosaic"><span class="toc-no">A.4</span><span class="toc-text">Blending into a mosaic</span></a>
+              <a href="#mosaic"><span class="toc-no">A.4</span><span class="toc-text">Blend the Images into a Mosaic</span></a>
               <ol class="toc-sub">
                 <li><a href="#feathering">Equal weights vs feathering</a></li>
                 <li><a href="#canvas-growth">How the canvas grows</a></li>
@@ -84,19 +83,18 @@
                 <li><a href="#photo-count">How many photos fit</a></li>
               </ol>
             </li>
-            <li><a href="#cylinder"><span class="toc-no">A.5</span><span class="toc-text">Cylindrical panorama</span></a></li>
+            <li><a href="#cylinder"><span class="toc-no">A.5</span><span class="toc-text">Bells &amp; Whistles</span></a></li>
           </ol>
         </li>
-        <li class="toc-group toc-pending">
-          <a href="#part-b"><span class="toc-no">B</span><span class="toc-text">Autostitching</span><span class="toc-note">Nov 10</span></a>
+        <li class="toc-group">
+          <a href="#part-b"><span class="toc-no">B</span><span class="toc-text">Feature Matching for Autostitching</span></a><ol><li><a href="#b-corners"><span class="toc-no">B.1</span><span class="toc-text">Harris Corner Detection</span></a></li><li><a href="#b-descriptors"><span class="toc-no">B.2</span><span class="toc-text">Feature Descriptor Extraction</span></a></li><li><a href="#b-matches"><span class="toc-no">B.3</span><span class="toc-text">Feature Matching</span></a></li><li><a href="#b-ransac"><span class="toc-no">B.4</span><span class="toc-text">RANSAC for Robust Homography</span></a></li><li><a href="#b-rotation"><span class="toc-no">B.5</span><span class="toc-text">Bells &amp; Whistles</span></a></li></ol>
         </li>
-        <li><a href="#learned"><span class="toc-text">What I learned</span></a></li>
       </ol>
     </nav>
 
   <main class="p4-main">
     <section class="section" id="overview">
-      <div class="section-heading"><h2>One center of projection, many pictures</h2></div>
+      <div class="section-heading"><h2>Overview</h2></div>
       <div class="section-content">
         <p class="lead-copy">
           If the camera only rotates about its optical center, every ray it
@@ -128,10 +126,10 @@
     <!-- ============================================================ PART A -->
 
     <section class="section part-intro" id="part-a">
-      <div class="section-heading"><p class="part-no">Part A</p><h2>Image warping and mosaicing</h2></div>
+      <div class="section-heading"><p class="part-no">Part A</p><h2>Image Warping and Mosaicing</h2></div>
       <div class="section-content">
         <p>
-          Every result comes from <code>code/main.py</code> with NumPy, and
+          Every Part A result comes from <code>code/main_a.py</code> with NumPy, and
           OpenCV is used only for file I/O, color conversion, and a distance
           transform. The extra figures (the equal-weight comparison,
           intermediate canvases, timings) come from a separate script that
@@ -139,13 +137,13 @@
           cylindrical projection are written by hand; no
           <code>findHomography</code>, <code>warpPerspective</code> or
           <code>remap</code>. Correspondences were clicked with the course
-          correspondence tool, 6 to 11 per pair, and saved as JSON.
+          correspondence tool, 6 to 13 per pair, and saved as JSON.
         </p>
       </div>
     </section>
 
     <section class="section" id="shoot">
-      <div class="section-heading"><p class="part-no">Part A 1</p><h2>Shooting the pictures</h2></div>
+      <div class="section-heading"><p class="part-no">Part A 1</p><h2>Shoot the Pictures</h2></div>
       <div class="section-content">
         <p>
           Three sequences, each shot by turning a handheld camera about its
@@ -173,7 +171,7 @@
     </section>
 
     <section class="section" id="homography">
-      <div class="section-heading"><p class="part-no">Part A 2</p><h2>Recovering homographies</h2></div>
+      <div class="section-heading"><p class="part-no">Part A 2</p><h2>Recover Homographies</h2></div>
       <div class="section-content">
         <p>
           Each correspondence \((x,y)\mapsto(u,v)\) gives two equations that
@@ -215,7 +213,7 @@
     H = np.linalg.inv(T2) @ Vt[-1].reshape(3, 3) @ T1   # undo the normalization
     return H / H[2, 2]</code></pre>
         <div class="reflection">
-          <h3>Why normalize first</h3>
+          <p><strong>Why normalize first</strong></p>
           <p>
             In raw pixels the columns of \(A\) mix 1, coordinates near 500,
             and products near 250,000. The ratio between the largest and the
@@ -228,7 +226,7 @@
           </p>
         </div>
 
-        <h3 class="content-heading" id="correspondences">Correspondences and the recovered matrices</h3>
+        <p class="content-heading" id="correspondences"><strong>Correspondences and the recovered matrices</strong></p>
         <p>
           Pick a pair below. Numbered dots are the clicked points. On the right,
           a hollow ring marks where \(H\) sends each left point, and the red
@@ -276,7 +274,7 @@
     </section>
 
     <section class="section" id="warp">
-      <div class="section-heading"><p class="part-no">Part A 3</p><h2>Warping and rectification</h2></div>
+      <div class="section-heading"><p class="part-no">Part A 3</p><h2>Warp the Images</h2></div>
       <div class="section-content">
         <p>
           Warping is done backwards. The four corners of the source go through
@@ -304,7 +302,7 @@ out = (1-dx)(1-dy) I00 + dx(1-dy) I10
           </div>
         </div>
 
-        <h3 class="content-heading" id="rectify-demo">Try it: rectify by dragging four corners</h3>
+        <p class="content-heading" id="rectify-demo"><strong>Try it: rectify by dragging four corners</strong></p>
         <p>
           Rectification is a homography with a made-up target. Choose four
           points that should be the corners of a rectangle, send them to the pixel centers
@@ -335,7 +333,7 @@ out = (1-dx)(1-dy) I00 + dx(1-dy) I10
         <p class="strip-label">USS Hornet strike board, photographed from below, so its bottom edge is wider than its top.</p><div class="rect-row"><figure class="quad-figure"><div class="quad-wrap"><img width="768" height="1024" src="media/a3/hornet_src.jpg" alt="Original photo: USS Hornet strike board, photographed from below, so its bottom edge is wider than its top." loading="lazy" decoding="async"><svg viewBox="0 0 768 1024" aria-hidden="true"><polygon points="65.0,262.0 717.0,262.0 756.0,764.0 21.0,761.0"/><circle cx="65.0" cy="262.0" r="7"/><circle cx="717.0" cy="262.0" r="7"/><circle cx="756.0" cy="764.0" r="7"/><circle cx="21.0" cy="761.0" r="7"/></svg></div><figcaption><span class="cap-text">Input with the four clicked corners.</span></figcaption></figure><figure><img width="700" height="515" src="media/a3/hornet_bilinear.jpg" alt="The board rectified to a fronto-parallel rectangle: its edges are axis-aligned and the rows and columns of flags run straight and evenly spaced" loading="lazy" decoding="async"><figcaption><span class="cap-text">Rectified, bilinear, 700 × 515.</span></figcaption></figure></div><figure class="rect-full"><img width="883" height="1069" src="media/a3/hornet_full.webp" alt="The whole photo pushed through the same homography: the ceiling and cables stretch into a wedge above the now-rectangular board" loading="lazy" decoding="async"><figcaption><span class="cap-text">The whole photo through the same \(H\). Everything off that plane is distorted, because \(H\) is only correct for the plane it was fit to.</span></figcaption></figure><p class="source-note">The board's true aspect ratio is unknown. I estimated it as 1.36 from the photo itself: with the focal length from the EXIF data, the corner homography must factor into a rotation and a translation, and that fixes the width-to-height ratio (it changes by less than 1% between f = 700 and 850 px). The target rectangle is 700 × 515.</p>
         <p class="strip-label">Museum placard lying on a display case, shot at a steep angle from above and in front, so its top edge is short and far away.</p><div class="rect-row"><figure class="quad-figure"><div class="quad-wrap"><img width="768" height="1024" src="media/a3/placard_src.jpg" alt="Original photo: Museum placard lying on a display case, shot at a steep angle from above and in front, so its top edge is short and far away." loading="lazy" decoding="async"><svg viewBox="0 0 768 1024" aria-hidden="true"><polygon points="163.0,608.0 416.0,597.0 435.0,875.0 139.0,890.0"/><circle cx="163.0" cy="608.0" r="7"/><circle cx="416.0" cy="597.0" r="7"/><circle cx="435.0" cy="875.0" r="7"/><circle cx="139.0" cy="890.0" r="7"/></svg></div><figcaption><span class="cap-text">Input with the four clicked corners.</span></figcaption></figure><figure><img width="600" height="590" src="media/a3/placard_bilinear.jpg" alt="The placard rectified to a square-on view: lines of text run horizontally with even spacing, and the title is readable" loading="lazy" decoding="async"><figcaption><span class="cap-text">Rectified, bilinear, 600 × 590.</span></figcaption></figure></div><figure class="rect-full"><img width="1232" height="1400" src="media/a3/placard_full.webp" alt="The whole photo pushed through the same homography: the display case and model plane stretch into a wide fan above the now-square placard" loading="lazy" decoding="async"><figcaption><span class="cap-text">The whole photo through the same \(H\). Everything off that plane is distorted, because \(H\) is only correct for the plane it was fit to.</span></figcaption></figure><p class="source-note">The placard is nearly square: the same focal-length argument gives an aspect ratio of 1.02 (0.99 to 1.03 for f between 650 and 800 px). The target is 600 × 590. Every row is stretched about 2× vertically (2.4× at the far top edge, 1.8× at the near bottom), so the samplers have to invent more pixels here than for the board.</p>
 
-        <h3 class="content-heading" id="samplers">Nearest neighbor versus bilinear</h3>
+        <p class="content-heading" id="samplers"><strong>Nearest neighbor versus bilinear</strong></p>
         <div class="p2-grid p2-grid-2 zoom-pair">
           <figure><img class="pixelated" width="576" height="264" src="media/a3/hornet_nearest_zoom.png" alt="Nearest-neighbor crop of the board&#x27;s title letters: jagged, stair-stepped edges" loading="lazy" decoding="async"><figcaption><span class="cap-text">Nearest neighbor: “U.S.S.”, a 96 × 44 px crop enlarged 6×.</span></figcaption></figure>
           <figure><img class="pixelated" width="576" height="264" src="media/a3/hornet_bilinear_zoom.png" alt="Bilinear crop of the board&#x27;s title letters: smooth but slightly soft edges" loading="lazy" decoding="async"><figcaption><span class="cap-text">Bilinear, same crop.</span></figcaption></figure>
@@ -352,7 +350,7 @@ out = (1-dx)(1-dy) I00 + dx(1-dy) I10
           </table>
         </div>
         <div class="reflection">
-          <h3>Speed against quality</h3>
+          <p><strong>Speed against quality</strong></p>
           <p>
             Both samplers cost the same inverse mapping. The difference is
             the lookup: nearest neighbor reads one pixel, bilinear reads four
@@ -371,7 +369,7 @@ out = (1-dx)(1-dy) I00 + dx(1-dy) I10
     </section>
 
     <section class="section" id="mosaic">
-      <div class="section-heading"><p class="part-no">Part A 4</p><h2>Blending into a mosaic</h2></div>
+      <div class="section-heading"><p class="part-no">Part A 4</p><h2>Blend the Images into a Mosaic</h2></div>
       <div class="section-content">
         <p>
           Correspondences only exist between neighbors, so <code>stitch</code>
@@ -394,7 +392,7 @@ out = (1-dx)(1-dy) I00 + dx(1-dy) I10
 weight = alpha * feather_weights(alpha > 0)              # inside stitchImages
 sources.append(np.dstack((color * weight[:, :, None], weight, alpha)))</code></pre>
 
-        <h3 class="content-heading" id="feathering">Equal weights versus feathering</h3>
+        <p class="content-heading" id="feathering"><strong>Equal weights versus feathering</strong></p>
         <p>
           My first version averaged every overlapping pixel with equal
           weight. Inside an overlap that is fine. At the overlap's border the
@@ -432,7 +430,7 @@ sources.append(np.dstack((color * weight[:, :, None], weight, alpha)))</code></p
           </p>
         </div>
 
-        <h3 class="content-heading" id="canvas-growth">How the canvas grows</h3>
+        <p class="content-heading" id="canvas-growth"><strong>How the canvas grows</strong></p>
         <figure class="explorer step-explorer" data-explorer>
           <div class="explorer-controls" role="radiogroup" aria-label="Stitching step">
             <span class="explorer-label">Step</span>
@@ -442,12 +440,12 @@ sources.append(np.dstack((color * weight[:, :, None], weight, alpha)))</code></p
           <figcaption class="explorer-note" aria-live="polite">Step 4: warp photo 5 into the frame of reference photo 3, on the right. The canvas grows to hold it, and the old mosaic is shifted, not re-warped.</figcaption>
         </figure>
 
-        <h3 class="content-heading" id="three-mosaics">Three mosaics</h3>
+        <p class="content-heading" id="three-mosaics"><strong>Three mosaics</strong></p>
         <div class="mosaic-block"><div class="t-strip mosaic-sources" style="--n: 5"><figure><img width="512" height="683" src="media/a1/set1_1.jpg" alt="Ridge source 1" loading="lazy" decoding="async"><figcaption>1</figcaption></figure><figure><img width="512" height="683" src="media/a1/set1_2.jpg" alt="Ridge source 2" loading="lazy" decoding="async"><figcaption>2</figcaption></figure><figure><img width="512" height="683" src="media/a1/set1_3.jpg" alt="Ridge source 3" loading="lazy" decoding="async"><figcaption>3</figcaption></figure><figure><img width="512" height="683" src="media/a1/set1_4.jpg" alt="Ridge source 4" loading="lazy" decoding="async"><figcaption>4</figcaption></figure><figure><img width="512" height="683" src="media/a1/set1_5.jpg" alt="Ridge source 5" loading="lazy" decoding="async"><figcaption>5</figcaption></figure></div><figure class="mosaic-result"><img width="1859" height="1099" src="media/a4/mosaic1_feather.webp" alt="Feathered ridge mosaic of 5 photos" loading="lazy" decoding="async"><figcaption><span class="cap-text">Ridge: 5 photos warped into photo 3's frame. Canvas 1859 × 1099, 72% covered.</span></figcaption></figure></div>
         <div class="mosaic-block"><div class="t-strip mosaic-sources" style="--n: 3"><figure><img width="512" height="768" src="media/a1/set2_1.jpg" alt="Sequoia source 1" loading="lazy" decoding="async"><figcaption>1</figcaption></figure><figure><img width="512" height="768" src="media/a1/set2_2.jpg" alt="Sequoia source 2" loading="lazy" decoding="async"><figcaption>2</figcaption></figure><figure><img width="512" height="768" src="media/a1/set2_3.jpg" alt="Sequoia source 3" loading="lazy" decoding="async"><figcaption>3</figcaption></figure></div><figure class="mosaic-result mosaic-tall"><img width="635" height="1399" src="media/a4/mosaic2_feather.webp" alt="Feathered sequoia mosaic of 3 photos" loading="lazy" decoding="async"><figcaption><span class="cap-text">Sequoia: 3 photos warped into photo 2's frame. Canvas 635 × 1399, 84% covered.</span></figcaption></figure></div>
         <div class="mosaic-block"><div class="t-strip mosaic-sources" style="--n: 5"><figure><img width="512" height="768" src="media/a1/set3_1.jpg" alt="Room source 1" loading="lazy" decoding="async"><figcaption>1</figcaption></figure><figure><img width="512" height="768" src="media/a1/set3_2.jpg" alt="Room source 2" loading="lazy" decoding="async"><figcaption>2</figcaption></figure><figure><img width="512" height="768" src="media/a1/set3_3.jpg" alt="Room source 3" loading="lazy" decoding="async"><figcaption>3</figcaption></figure><figure><img width="512" height="768" src="media/a1/set3_4.jpg" alt="Room source 4" loading="lazy" decoding="async"><figcaption>4</figcaption></figure><figure><img width="512" height="768" src="media/a1/set3_5.jpg" alt="Room source 5" loading="lazy" decoding="async"><figcaption>5</figcaption></figure></div><figure class="mosaic-result"><img width="1588" height="1504" src="media/a4/mosaic3_feather.webp" alt="Feathered room mosaic of 5 photos" loading="lazy" decoding="async"><figcaption><span class="cap-text">Room: 5 photos warped into photo 3's frame. Canvas 1588 × 1504, 66% covered.</span></figcaption></figure></div>
 
-        <h3 class="content-heading" id="photo-count">How many ridge photos fit on a plane?</h3>
+        <p class="content-heading" id="photo-count"><strong>How many ridge photos fit on a plane?</strong></p>
         <p>
           The ridge sequence has nine photos. The mosaic above uses the
           first five. Adding more shows why a plane runs out. A pixel at angle
@@ -471,7 +469,7 @@ sources.append(np.dstack((color * weight[:, :, None], weight, alpha)))</code></p
           </table>
         </div>
         <div class="reflection">
-          <h3>What went right, and what did not</h3>
+          <p><strong>What went right, and what did not</strong></p>
           <p>
             Feathering removed every exposure seam in the three mosaics. The
             sky of the ridge and the ceiling of the room are now continuous.
@@ -498,7 +496,7 @@ sources.append(np.dstack((color * weight[:, :, None], weight, alpha)))</code></p
     </section>
 
     <section class="section" id="cylinder">
-      <div class="section-heading"><p class="part-no">Part A 5</p><h2>Bells &amp; whistles: a cylindrical panorama</h2></div>
+      <div class="section-heading"><p class="part-no">Part A 5</p><h2>Bells &amp; Whistles</h2></div>
       <div class="section-content">
         <p>
           A cylinder of radius \(f\) around the camera keeps every horizontal
@@ -572,7 +570,7 @@ sources.append(np.dstack((color * weight[:, :, None], weight, alpha)))</code></p
           <figure><img width="1600" height="873" src="media/a4/set1_n9.webp" alt="Planar mosaic of all nine ridge photos: a bow-tie shape with the outer photos stretched enormously" loading="lazy" decoding="async"><figcaption><span class="cap-text">Planar, nine photos: 4576 × 2496, 49% covered.</span></figcaption></figure><figure><img width="2062" height="755" src="media/a5/cyl_set1.webp" alt="Cylindrical mosaic of the same nine photos: a long, even strip" loading="lazy" decoding="async"><figcaption><span class="cap-text">Cylindrical, nine photos: 2062 × 755.</span></figcaption></figure>
         </figure>
         <div class="reflection">
-          <h3>Plane versus cylinder</h3>
+          <p><strong>Plane versus cylinder</strong></p>
           <p>
             The planar mosaic of all nine photos needs a 4576 × 2496 canvas
             and leaves half of it empty. The cylindrical one is
@@ -589,13 +587,12 @@ sources.append(np.dstack((color * weight[:, :, None], weight, alpha)))</code></p
     <!-- ============================================================ PART B -->
 
     <section class="section part-intro" id="part-b">
-      <div class="section-heading"><p class="part-no">Part B</p><h2>Feature matching for autostitching</h2></div>
+      <div class="section-heading"><p class="part-no">Part B</p><h2>Feature Matching for Autostitching</h2></div>
       <div class="section-content">
         <p>
           Part B replaces the clicking with Harris corners, adaptive
           non-maximal suppression, MOPS-style descriptors, ratio-test matching
-          and RANSAC, following Brown et al. The results will be added here,
-          next to the hand-stitched mosaics above for comparison.
+          and RANSAC, following Brown et al. The following sections trace the pipeline from candidate points to three automatic mosaics, then test a rotation-invariant descriptor against controlled image rotations.
         </p>
         <ol class="partb-list">
           <li><span class="part-no">B.1</span>Harris corners, with and without ANMS</li>
@@ -607,21 +604,12 @@ sources.append(np.dstack((color * weight[:, :, None], weight, alpha)))</code></p
       </div>
     </section>
 
-    <section class="section conclusion-section" id="learned">
-      <div class="section-heading"><h2>What I learned</h2></div>
-      <div class="section-content">
-        <p class="conclusion-copy">
-          The homography is the easy part. Eight numbers fall out of one SVD,
-          as long as the coordinates are normalized first. Almost everything
-          that went wrong came from the assumptions around it. The camera has
-          to turn about its optical center, or nearby objects double. Exposure
-          changes between frames, so equal-weight blending draws every
-          rectangle. A plane can only hold so much angle. Each fix (shooting
-          distant scenes, feathering, a cylinder) answers one of those
-          assumptions rather than the matrix.
-        </p>
-      </div>
-    </section>
+<section class="section" id="b-corners"><div class="section-heading"><p class="part-no">Part B.1</p><h2>Harris Corner Detection</h2></div><div class="section-content"><p>Harris detects local intensity changes in two directions. I use the supplied single-scale detector, discard a 20 px boundary, and keep 200 points with adaptive non-maximal suppression. For each point, its suppression radius is the distance to the nearest point satisfying fᵢ &lt; 0.9 fⱼ. The largest radii survive: a strong cluster cannot consume the entire feature budget.</p><details open><summary>Ridge: 8567 Harris candidates → 200 ANMS points</summary><div class="b-compare"><figure class="feature-figure"><img src="media/b/set1_harris.jpg" alt="Harris local maxima, before ANMS" loading="lazy" decoding="async"><figcaption>Harris local maxima, before ANMS</figcaption></figure><figure class="feature-figure"><img src="media/b/set1_anms.jpg" alt="ANMS: 200 spatially distributed points" loading="lazy" decoding="async"><figcaption>ANMS: 200 spatially distributed points</figcaption></figure></div></details><details><summary>Sequoia: 8311 Harris candidates → 200 ANMS points</summary><div class="b-compare"><figure class="feature-figure"><img src="media/b/set2_harris.jpg" alt="Harris local maxima, before ANMS" loading="lazy" decoding="async"><figcaption>Harris local maxima, before ANMS</figcaption></figure><figure class="feature-figure"><img src="media/b/set2_anms.jpg" alt="ANMS: 200 spatially distributed points" loading="lazy" decoding="async"><figcaption>ANMS: 200 spatially distributed points</figcaption></figure></div></details><details><summary>Room: 10179 Harris candidates → 200 ANMS points</summary><div class="b-compare"><figure class="feature-figure"><img src="media/b/set3_harris.jpg" alt="Harris local maxima, before ANMS" loading="lazy" decoding="async"><figcaption>Harris local maxima, before ANMS</figcaption></figure><figure class="feature-figure"><img src="media/b/set3_anms.jpg" alt="ANMS: 200 spatially distributed points" loading="lazy" decoding="async"><figcaption>ANMS: 200 spatially distributed points</figcaption></figure></div></details></div></section>
+<section class="section" id="b-descriptors"><div class="section-heading"><p class="part-no">Part B.2</p><h2>Feature Descriptor Extraction</h2></div><div class="section-content"><p>Each feature samples a blurred 40 × 40 neighborhood on an axis-aligned 8 × 8 grid with 5 px spacing. A 17 × 17 Gaussian prefilter reduces aliasing. Subtracting the mean and dividing by the standard deviation removes additive brightness and positive contrast changes. Flat patches remain zero and cannot pass an ambiguous nearest-neighbor test. These are simplified MOPS-style patches: the baseline has neither scale nor rotation invariance.</p><figure class="feature-figure"><img src="media/b/descriptor_locations.jpg" alt="Eight representative descriptor neighborhoods on the ridge source image" loading="lazy" decoding="async"><figcaption>Eight representative descriptor neighborhoods on the ridge source image</figcaption></figure><figure class="feature-figure"><img src="media/b/descriptors.png" alt="Top: source neighborhoods. Bottom: normalized 8 × 8 descriptors enlarged with nearest-neighbor display. All use the same −3 to +3 intensity scale; display values are clipped only for visualization." loading="lazy" decoding="async"><figcaption>Top: source neighborhoods. Bottom: normalized 8 × 8 descriptors enlarged with nearest-neighbor display. All use the same −3 to +3 intensity scale; display values are clipped only for visualization.</figcaption></figure></div></section>
+<section class="section" id="b-matches"><div class="section-heading"><p class="part-no">Part B.3</p><h2>Feature Matching</h2></div><div class="section-content"><p>For each descriptor, I find its two nearest neighbors by Euclidean distance and accept the best only when d₁/d₂ &lt; 0.8. This measures distinctiveness: a small distance is not enough if another candidate is almost as close. The threshold uses distances, not squared distances (the equivalent SSD ratio is 0.64). Repeated foliage and furniture can still produce false matches, so this is an appearance filter before geometric verification.</p><details open><summary>Ridge: ratio-test matches and RANSAC consensus</summary><figure class="feature-figure"><img src="media/b/set1_matches.jpg" alt="Ratio-test matches, before geometric verification" loading="lazy" decoding="async"><figcaption>Ratio-test matches, before geometric verification</figcaption></figure><figure class="feature-figure"><img src="media/b/set1_inliers.jpg" alt="Matches consistent with the final homography within 5 px" loading="lazy" decoding="async"><figcaption>Matches consistent with the final homography within 5 px</figcaption></figure></details><details><summary>Sequoia: ratio-test matches and RANSAC consensus</summary><figure class="feature-figure"><img src="media/b/set2_matches.jpg" alt="Ratio-test matches, before geometric verification" loading="lazy" decoding="async"><figcaption>Ratio-test matches, before geometric verification</figcaption></figure><figure class="feature-figure"><img src="media/b/set2_inliers.jpg" alt="Matches consistent with the final homography within 5 px" loading="lazy" decoding="async"><figcaption>Matches consistent with the final homography within 5 px</figcaption></figure></details><details><summary>Room: ratio-test matches and RANSAC consensus</summary><figure class="feature-figure"><img src="media/b/set3_matches.jpg" alt="Ratio-test matches, before geometric verification" loading="lazy" decoding="async"><figcaption>Ratio-test matches, before geometric verification</figcaption></figure><figure class="feature-figure"><img src="media/b/set3_inliers.jpg" alt="Matches consistent with the final homography within 5 px" loading="lazy" decoding="async"><figcaption>Matches consistent with the final homography within 5 px</figcaption></figure></details></div></section>
+<section class="section" id="b-ransac"><div class="section-heading"><p class="part-no">Part B.4</p><h2>RANSAC for Robust Homography</h2></div><div class="section-content"><p>I sample four correspondences for 1,000 RANSAC trials, reject degenerate configurations, estimate a normalized DLT homography, and count forward reprojection errors below 5 px. The largest consensus is refitted, and membership is recomputed against the returned matrix. The random seed is 180. Adjacent transforms are composed into the middle image’s coordinate frame; the original Part A inverse warping and feathering then produce the mosaics.</p><div class="table-scroll" tabindex="0"><table class="b-table"><thead><tr><th>Scene</th><th>Pair</th><th>Matches</th><th>Final inliers</th><th>Inlier RMSE (px)</th></tr></thead><tbody><tr><td>Ridge</td><td>1 → 2</td><td>42</td><td>34</td><td>0.80</td></tr><tr><td>Ridge</td><td>2 → 3</td><td>60</td><td>46</td><td>1.17</td></tr><tr><td>Ridge</td><td>3 → 4</td><td>63</td><td>52</td><td>1.27</td></tr><tr><td>Ridge</td><td>4 → 5</td><td>36</td><td>27</td><td>0.80</td></tr><tr><td>Sequoia</td><td>1 → 2</td><td>84</td><td>77</td><td>0.94</td></tr><tr><td>Sequoia</td><td>2 → 3</td><td>99</td><td>86</td><td>0.76</td></tr><tr><td>Room</td><td>1 → 2</td><td>111</td><td>70</td><td>1.52</td></tr><tr><td>Room</td><td>2 → 3</td><td>80</td><td>50</td><td>1.08</td></tr><tr><td>Room</td><td>3 → 4</td><td>101</td><td>70</td><td>1.19</td></tr><tr><td>Room</td><td>4 → 5</td><td>78</td><td>47</td><td>1.43</td></tr></tbody></table></div><figure class="feature-figure"><svg viewBox="0 0 600 250" role="img" aria-label="Final inlier reprojection error histogram" style="width:100%;font:14px sans-serif;fill:currentColor"><rect x="65" y="50.00" width="60" height="150.00" fill="#175cd3"/><text x="95" y="225" text-anchor="middle">0–1 px</text><text x="95" y="40.00" text-anchor="middle">395</text><rect x="165" y="150.63" width="60" height="49.37" fill="#175cd3"/><text x="195" y="225" text-anchor="middle">1–2 px</text><text x="195" y="140.63" text-anchor="middle">130</text><rect x="265" y="192.41" width="60" height="7.59" fill="#175cd3"/><text x="295" y="225" text-anchor="middle">2–3 px</text><text x="295" y="182.41" text-anchor="middle">20</text><rect x="365" y="197.34" width="60" height="2.66" fill="#175cd3"/><text x="395" y="225" text-anchor="middle">3–4 px</text><text x="395" y="187.34" text-anchor="middle">7</text><rect x="465" y="197.34" width="60" height="2.66" fill="#175cd3"/><text x="495" y="225" text-anchor="middle">4–5 px</text><text x="495" y="187.34" text-anchor="middle">7</text></svg><figcaption>Final forward reprojection errors across all ten adjacent pairs. Counts include only matches within the 5 px threshold; a consensus fit does not measure alignment at other depths.</figcaption></figure><p class="strip-label"><strong>Ridge</strong></p><div class="b-compare"><figure class="feature-figure"><img src="media/b/set1_manual_compare.jpg" alt="Manual correspondences" loading="lazy" decoding="async"><figcaption>Manual correspondences</figcaption></figure><figure class="feature-figure"><img src="media/b/set1_auto_compare.jpg" alt="Automatic correspondences; common pixel scale, centered canvases" loading="lazy" decoding="async"><figcaption>Automatic correspondences; common pixel scale, centered canvases</figcaption></figure></div><p class="strip-label"><strong>Sequoia</strong></p><div class="b-compare"><figure class="feature-figure"><img src="media/b/set2_manual_compare.jpg" alt="Manual correspondences" loading="lazy" decoding="async"><figcaption>Manual correspondences</figcaption></figure><figure class="feature-figure"><img src="media/b/set2_auto_compare.jpg" alt="Automatic correspondences; common pixel scale, centered canvases" loading="lazy" decoding="async"><figcaption>Automatic correspondences; common pixel scale, centered canvases</figcaption></figure></div><p class="strip-label"><strong>Room</strong></p><div class="b-compare"><figure class="feature-figure"><img src="media/b/set3_manual_compare.jpg" alt="Manual correspondences" loading="lazy" decoding="async"><figcaption>Manual correspondences</figcaption></figure><figure class="feature-figure"><img src="media/b/set3_auto_compare.jpg" alt="Automatic correspondences; common pixel scale, centered canvases" loading="lazy" decoding="async"><figcaption>Automatic correspondences; common pixel scale, centered canvases</figcaption></figure></div><div class="reflection"><p class="strip-label"><strong>What automation can and cannot fix</strong></p><p>Hundreds of candidates replace a few hand-picked points, but a low fitting error only describes the selected correspondences. Nearby pine branches and chairs can move relative to the background because the camera translates slightly; one homography cannot align both depths. Repeated texture can bias the consensus, while composing adjacent transforms propagates estimation error toward the outer frames. Feathering hides exposure boundaries but cannot correct a geometric double edge.</p></div></div></section>
+<section class="section" id="b-rotation"><div class="section-heading"><p class="part-no">Part B.5</p><h2>Bells &amp; Whistles</h2></div><div class="section-content"><p>The extension estimates a dominant direction from the image gradient after Gaussian smoothing with σ = 4.5 px. Rotating the sampling grid into that local frame gives corresponding neighborhoods a common orientation. The descriptor remains 8 × 8 with the same spacing, blur, normalization and ratio threshold; the baseline remains available unchanged.</p><p>For a controlled test, I rotate the first image of each scene by known angles using the handwritten inverse warper. Both methods use the same detected points, a 30 px source boundary and a 30 px erosion of the target validity mask to exclude padded borders. A match is correct when its position agrees with the known rotation within 5 px. This evaluates matching directly, independently of a RANSAC estimate.</p><div class="table-scroll" tabindex="0"><table class="b-table"><thead><tr><th>Scene</th><th>Rotation</th><th>Aligned correct/all</th><th>Oriented correct/all</th><th>Aligned precision</th><th>Oriented precision</th></tr></thead><tbody><tr><td>Ridge</td><td>0°</td><td>123/133</td><td>115/119</td><td>92.5%</td><td>96.6%</td></tr><tr><td>Ridge</td><td>15°</td><td>59/64</td><td>120/125</td><td>92.2%</td><td>96.0%</td></tr><tr><td>Ridge</td><td>30°</td><td>1/8</td><td>117/127</td><td>12.5%</td><td>92.1%</td></tr><tr><td>Ridge</td><td>45°</td><td>1/4</td><td>120/124</td><td>25.0%</td><td>96.8%</td></tr><tr><td>Ridge</td><td>60°</td><td>0/8</td><td>121/126</td><td>0.0%</td><td>96.0%</td></tr><tr><td>Ridge</td><td>90°</td><td>0/23</td><td>130/134</td><td>0.0%</td><td>97.0%</td></tr><tr><td>Sequoia</td><td>0°</td><td>149/153</td><td>132/135</td><td>97.4%</td><td>97.8%</td></tr><tr><td>Sequoia</td><td>15°</td><td>84/91</td><td>146/146</td><td>92.3%</td><td>100.0%</td></tr><tr><td>Sequoia</td><td>30°</td><td>1/14</td><td>141/147</td><td>7.1%</td><td>95.9%</td></tr><tr><td>Sequoia</td><td>45°</td><td>0/9</td><td>140/143</td><td>0.0%</td><td>97.9%</td></tr><tr><td>Sequoia</td><td>60°</td><td>0/16</td><td>144/147</td><td>0.0%</td><td>98.0%</td></tr><tr><td>Sequoia</td><td>90°</td><td>0/9</td><td>133/136</td><td>0.0%</td><td>97.8%</td></tr><tr><td>Room</td><td>0°</td><td>132/151</td><td>121/139</td><td>87.4%</td><td>87.1%</td></tr><tr><td>Room</td><td>15°</td><td>52/76</td><td>133/149</td><td>68.4%</td><td>89.3%</td></tr><tr><td>Room</td><td>30°</td><td>0/28</td><td>121/137</td><td>0.0%</td><td>88.3%</td></tr><tr><td>Room</td><td>45°</td><td>0/24</td><td>117/134</td><td>0.0%</td><td>87.3%</td></tr><tr><td>Room</td><td>60°</td><td>0/33</td><td>121/132</td><td>0.0%</td><td>91.7%</td></tr><tr><td>Room</td><td>90°</td><td>0/26</td><td>123/143</td><td>0.0%</td><td>86.0%</td></tr></tbody></table></div><div class="b-compare"><figure class="feature-figure"><img src="media/b/rotation_aligned.jpg" alt="45° ridge rotation: axis-aligned baseline matches" loading="lazy" decoding="async"><figcaption>45° ridge rotation: axis-aligned baseline matches</figcaption></figure><figure class="feature-figure"><img src="media/b/rotation_oriented.jpg" alt="45° ridge rotation: direction-normalized matches" loading="lazy" decoding="async"><figcaption>45° ridge rotation: direction-normalized matches</figcaption></figure></div><div class="reflection"><p class="strip-label"><strong>Orientation is an estimate too</strong></p><p>Direction normalization changes the trade-off rather than guaranteeing a win on every image. A corner can have a weak or ambiguous smoothed gradient; small localization changes then rotate the sampling window substantially. Interpolation and changing corner detections also limit a synthetic rotation experiment. The table reports every tested angle and scene, including failures, rather than selecting only a favorable example. Across the three scenes at 45°, the axis-aligned baseline retains only 0–1 correct matches, while direction normalization retains over 100 in every scene. At 0°, it retains fewer correct matches than the baseline: direction estimation has a cost even without rotation. Scale and projective distortions remain outside this extension.</p></div></div></section>
+<p class="source-note">References: <a href="https://cal-cs180.github.io/fa26/hw/proj3/partB.html">Project specification</a>; <a href="https://cal-cs180.github.io/fa26/hw/proj3/Papers/MOPS.pdf">Brown, Szeliski and Winder, Multi-Image Matching using Multi-Scale Oriented Patches</a>. Interactive A figures are available on the live page; all B results and rotation measurements are included statically for the PDF.</p>
   </main>
   </div>
 

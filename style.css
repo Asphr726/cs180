@@ -4060,3 +4060,16 @@ code {
     display: none;
   }
 }
+
+/* Project 4B: paired evidence and readable measurement tables. */
+.project4-page .b-compare { display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:1.5rem;align-items:start;margin:1.5rem 0 2.5rem; }
+.project4-page .b-compare img {width:100%;height:auto;object-fit:contain;}
+.project4-page details {margin:1.5rem 0;border-block:1px solid var(--line);padding:1rem 0;}
+.project4-page summary {cursor:pointer;color:var(--blue-dark);font-weight:600;}
+.project4-page summary:focus-visible {outline:2px solid var(--blue);outline-offset:5px;}
+.project4-page .b-table {width:100%;border-collapse:collapse;font-variant-numeric:tabular-nums;font-size:.86rem;}
+.project4-page .b-table th,.project4-page .b-table td {text-align:left;padding:.65rem .8rem;border-bottom:1px solid var(--line);white-space:nowrap;}
+.project4-page .b-table th {background:var(--blue-soft);}
+.project4-page .table-scroll {overflow:auto;margin-block:1.5rem;}
+@media(max-width:650px){.project4-page .b-compare {grid-template-columns:1fr;}}
+@media print {.project4-page details {display:block;} .project4-page details::details-content {content-visibility:visible;} .project4-page .table-scroll {overflow:visible;} .project4-page .b-table {font-size:8px;} }
